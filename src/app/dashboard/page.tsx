@@ -121,7 +121,6 @@ export default function LandlordDashboard() {
     setSuccess(null);
 
     try {
-      // 1. Update tenant_balances
       const { error: balError } = await supabase
         .from("tenant_balances")
         .update({
@@ -134,7 +133,6 @@ export default function LandlordDashboard() {
 
       if (balError) throw balError;
 
-      // 2. Update houses
       const { error: houseError } = await supabase
         .from("houses")
         .update({
@@ -146,7 +144,6 @@ export default function LandlordDashboard() {
 
       if (houseError) throw houseError;
 
-      // 3. Update tenants
       const { error: tenantError } = await supabase
         .from("tenants")
         .update({
@@ -206,6 +203,12 @@ export default function LandlordDashboard() {
                   className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
                 >
                   Pending Payments
+                </Link>
+                <Link
+                  href="/record-payment"
+                  className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
+                >
+                  Record Payment
                 </Link>
               </nav>
             </div>
