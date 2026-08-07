@@ -3,11 +3,6 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 type TenantRow = {
   tenant_id: string;
   full_name: string;
@@ -57,6 +52,12 @@ export default function LandlordDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Create the client only in the browser
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
     async function loadData() {
       setLoading(true);
       setError(null);
@@ -125,11 +126,6 @@ export default function LandlordDashboard() {
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             Error loading data: {error}
-            <br />
-            <span className="text-xs">
-              Check that your Supabase environment variables are set correctly
-              in Netlify.
-            </span>
           </div>
         )}
 
