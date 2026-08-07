@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 
 const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
@@ -53,14 +54,24 @@ export default function LandlordDashboard() {
   const [rows, setRows] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const router = useRouter();
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    async function checkUserAndLoad() {
+      // Check if user is logged in
+      const { data: { session } } = await supabase.auth.getSession();
 
-    async function loadData() {
-      setLoading(true);
-      setError(null);
+      if (!session) {
+        router.push("/auth/login");
+        return;
+      }
 
+      setCheckingAuth(false);
+
+      // Load data
       const { data, error } = await supabase
         .from("tenant_overview")
         .select("*")
@@ -76,8 +87,21 @@ export default function LandlordDashboard() {
       setLoading(false);
     }
 
-    loadData();
-  }, []);
+    checkUserAndLoad();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/auth/login");
+  };
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-slate-500">Checking login...</p>
+      </div>
+    );
+  }
 
   const totalExpected = rows.reduce(
     (sum, r) => sum + Number(r.monthly_rent || 0),
@@ -91,7 +115,15 @@ export default function LandlordDashboard() {
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Landlord Dashboard</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Landlord Dashboard</h1>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-slate-600 hover:text-slate-900 border px-3 py-1.5 rounded-lg"
+          >
+            Logout
+          </button>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-xl border p-5">
@@ -150,27 +182,4 @@ export default function LandlordDashboard() {
                 </thead>
                 <tbody className="divide-y">
                   {rows.map((row) => (
-                    <tr key={row.tenant_id} className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-medium">{row.house_name}</td>
-                      <td className="px-6 py-3">{row.full_name}</td>
-                      <td className="px-6 py-3 text-slate-600">{row.phone || "—"}</td>
-                      <td className="px-6 py-3">{formatMK(Number(row.monthly_rent))}</td>
-                      <td className="px-6 py-3">{row.next_due_date}</td>
-                      <td className="px-6 py-3 font-medium text-red-600">
-                        {formatMK(Number(row.current_balance))}
-                      </td>
-                      <td className="px-6 py-3">
-                        <StatusBadge status={row.status} />
-                      </td>
-                      <td className="px-6 py-3 text-slate-600">{row.bank_account}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-    </main>
-  );
-}
+                    <tr key={row.tenant_id} className
