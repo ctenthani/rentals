@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -20,6 +21,8 @@ function formatMK(amount: number) {
 
 export default function TenantPortal() {
   const [tenant, setTenant] = useState<any>(null);
+  const [house, setHouse] = useState<any>(null);
+  const [balance, setBalance] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -28,43 +31,51 @@ export default function TenantPortal() {
 
   useEffect(() => {
     async function loadTenant() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session) {
         router.push("/auth/login");
         return;
       }
 
-      // Find the tenant linked to this logged-in user
-      const { data, error } = await supabase
+      // 1. Get the tenant
+      const { data: tenantData, error: tenantError } = await supabase
         .from("tenants")
-        .select(`
-          id,
-          full_name,
-          phone,
-          houses (
-            code,
-            name,
-            monthly_rent,
-            bank_account
-          ),
-          tenant_balances (
-            current_balance,
-            next_due_date,
-            months_in_advance,
-            status
-          )
-        `)
+        .select("id, full_name, phone, house_id")
         .eq("auth_user_id", session.user.id)
         .single();
 
-      if (error || !data) {
-        setError("Your account is not linked to any tenant yet. Contact the landlord.");
+      if (tenantError || !tenantData) {
+        setError(
+          "Your account is not linked to any tenant yet. Contact the landlord."
+        );
         setLoading(false);
         return;
       }
 
-      setTenant(data);
+      setTenant(tenantData);
+
+      // 2. Get the house
+      const { data: houseData } = await supabase
+        .from("houses")
+        .select("code, name, monthly_rent, bank_account")
+        .eq("id", tenantData.house_id)
+        .single();
+
+      setHouse(houseData);
+
+      // 3. Get the balance
+      const { data: balanceData } = await supabase
+        .from("tenant_balances")
+        .select(
+          "current_balance, next_due_date, months_in_advance, status"
+        )
+        .eq("tenant_id", tenantData.id)
+        .single();
+
+      setBalance(balanceData);
       setLoading(false);
     }
 
@@ -100,18 +111,13 @@ export default function TenantPortal() {
     );
   }
 
-  const house = Array.isArray(tenant.houses) ? tenant.houses[0] : tenant.houses;
-  const balance = Array.isArray(tenant.tenant_balances)
-    ? tenant.tenant_balances[0]
-    : tenant.tenant_balances;
-
   return (
     <main className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-lg mx-auto space-y-4">
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-slate-500">Welcome</p>
-            <h1 className="text-xl font-bold">{tenant.full_name}</h1>
+            <h1 className="text-xl font-bold">{tenant?.full_name}</h1>
           </div>
           <button
             onClick={handleLogout}
@@ -130,7 +136,9 @@ export default function TenantPortal() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-slate-600">Next Due Date</span>
-              <span className="font-medium">{balance?.next_due_date || "—"}</span>
+              <span className="font-medium">
+                {balance?.next_due_date || "—"}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-600">Outstanding Balance</span>
@@ -165,16 +173,17 @@ export default function TenantPortal() {
         <div className="bg-white rounded-xl border p-5 text-sm space-y-2">
           <h3 className="font-medium mb-2">Payment Details</h3>
           <p>
-            <span className="text-slate-500">Bank:</span> National Bank of Malawi
+            <span className="text-slate-500">Bank:</span> National Bank of
+            Malawi
           </p>
           <p>
             <span className="text-slate-500">Account:</span>{" "}
-            <strong>{house?.bank_account}</strong>
+            <strong>{house?.bank_account || "—"}</strong>
           </p>
           <p>
             <span className="text-slate-500">Reference:</span>{" "}
             <strong>
-              {house?.code}-{tenant.full_name.replace(/\s+/g, "")}
+              {house?.code}-{tenant?.full_name?.replace(/\s+/g, "")}
             </strong>
           </p>
         </div>
