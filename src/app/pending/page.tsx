@@ -96,7 +96,6 @@ export default function PendingPaymentsPage() {
     setProcessing(submission.id);
     setMessage(null);
 
-    // Call the database function we created earlier
     const { error } = await supabase.rpc("confirm_payment_submission", {
       p_submission_id: submission.id,
       p_confirmed_amount: submission.amount,
@@ -109,7 +108,9 @@ export default function PendingPaymentsPage() {
       return;
     }
 
-    setMessage(`Payment of ${formatMK(submission.amount)} confirmed successfully.`);
+    setMessage(
+      `Payment of ${formatMK(submission.amount)} confirmed successfully.`
+    );
     await fetchSubmissions();
     setProcessing(null);
   };
@@ -183,7 +184,8 @@ export default function PendingPaymentsPage() {
                       {formatMK(Number(sub.amount))}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {sub.method} • {sub.paid_date} • Ref: {sub.reference_used}
+                      {sub.method} • {sub.paid_date} • Ref:{" "}
+                      {sub.reference_used}
                     </p>
                   </div>
 
