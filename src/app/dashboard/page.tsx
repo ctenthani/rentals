@@ -9,7 +9,6 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
-// Tenants who must pay 3 months in advance
 const THREE_MONTHS_TENANTS = [
   "Joe Lipanda",
   "Elias Chisoni",
@@ -49,6 +48,7 @@ export default function LandlordDashboard() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
@@ -67,7 +67,7 @@ export default function LandlordDashboard() {
         return;
       }
 
-      // If this user is linked to a tenant → send them to Tenant Portal
+      // Redirect tenants away from landlord dashboard
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
@@ -88,13 +88,18 @@ export default function LandlordDashboard() {
 
   async function loadData() {
     setLoading(true);
+    setError(null);
+
     const { data, error } = await supabase
       .from("tenant_overview")
       .select("*")
       .order("house_code");
 
-    if (error) setError(error.message);
-    else setRows(data || []);
+    if (error) {
+      setError(error.message);
+    } else {
+      setRows(data || []);
+    }
     setLoading(false);
   }
 
@@ -105,46 +110,61 @@ export default function LandlordDashboard() {
 
   const openEdit = (row: any) => {
     setEditing({ ...row });
+    setSuccess(null);
+    setError(null);
   };
 
   const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
     setError(null);
+    setSuccess(null);
 
-    // Update balance
-    await supabase
-      .from("tenant_balances")
-      .update({
-        next_due_date: editing.next_due_date,
-        current_balance: Number(editing.current_balance),
-        status: editing.status,
-        months_in_advance: Number(editing.months_in_advance || 0),
-      })
-      .eq("tenant_id", editing.tenant_id);
+    try {
+      // 1. Update tenant_balances
+      const { error: balError } = await supabase
+        .from("tenant_balances")
+        .update({
+          next_due_date: editing.next_due_date,
+          current_balance: Number(editing.current_balance),
+          status: editing.status,
+          months_in_advance: Number(editing.months_in_advance || 0),
+        })
+        .eq("tenant_id", editing.tenant_id);
 
-    // Update house
-    await supabase
-      .from("houses")
-      .update({
-        name: editing.house_name,
-        monthly_rent: Number(editing.monthly_rent),
-        bank_account: editing.bank_account,
-      })
-      .eq("code", editing.house_code);
+      if (balError) throw balError;
 
-    // Update tenant
-    await supabase
-      .from("tenants")
-      .update({
-        full_name: editing.full_name,
-        phone: editing.phone,
-      })
-      .eq("id", editing.tenant_id);
+      // 2. Update houses
+      const { error: houseError } = await supabase
+        .from("houses")
+        .update({
+          name: editing.house_name,
+          monthly_rent: Number(editing.monthly_rent),
+          bank_account: editing.bank_account,
+        })
+        .eq("code", editing.house_code);
 
-    setEditing(null);
-    setSaving(false);
-    await loadData();
+      if (houseError) throw houseError;
+
+      // 3. Update tenants
+      const { error: tenantError } = await supabase
+        .from("tenants")
+        .update({
+          full_name: editing.full_name,
+          phone: editing.phone,
+        })
+        .eq("id", editing.tenant_id);
+
+      if (tenantError) throw tenantError;
+
+      setSuccess("Changes saved successfully");
+      setEditing(null);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || "Failed to save changes");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (checkingAuth) {
@@ -200,7 +220,7 @@ export default function LandlordDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Summary */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Expected Rent</p>
@@ -227,18 +247,26 @@ export default function LandlordDashboard() {
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
+          <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
             {error}
           </div>
         )}
 
-        {/* Table Card */}
+        {success && (
+          <div className="mb-4 p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-sm">
+            {success}
+          </div>
+        )}
+
+        {/* Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-            <h2 className="font-semibold text-slate-800">All Houses & Tenants</h2>
-            <span className="text-xs text-slate-500">
-              3 months advance: Lipanda, Chisoni, Emily, Gift Mphande
-            </span>
+          <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+            <h2 className="font-semibold text-slate-800">
+              All Houses & Tenants
+            </h2>
+            <p className="text-xs text-slate-500">
+              3 months advance required: Lipanda, Chisoni, Emily, Gift Mphande
+            </p>
           </div>
 
           {loading ? (
@@ -252,7 +280,7 @@ export default function LandlordDashboard() {
                     <th className="px-6 py-3 font-medium">Tenant</th>
                     <th className="px-6 py-3 font-medium">Phone</th>
                     <th className="px-6 py-3 font-medium">Rent</th>
-                    <th className="px-6 py-3 font-medium">Next Due</th>
+                    <th className="px-6 py-3 font-medium">Paid Up To</th>
                     <th className="px-6 py-3 font-medium">Balance</th>
                     <th className="px-6 py-3 font-medium">Advance</th>
                     <th className="px-6 py-3 font-medium">Status</th>
@@ -262,14 +290,14 @@ export default function LandlordDashboard() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.map((row) => {
-                    const requiredAdvance = THREE_MONTHS_TENANTS.includes(
+                    const required = THREE_MONTHS_TENANTS.includes(
                       row.full_name
                     )
                       ? 3
                       : 2;
 
                     return (
-                      <tr key={row.tenant_id} className="hover:bg-slate-50/50">
+                      <tr key={row.tenant_id} className="hover:bg-slate-50/60">
                         <td className="px-6 py-3.5 font-medium text-slate-800">
                           {row.house_name}
                         </td>
@@ -280,12 +308,14 @@ export default function LandlordDashboard() {
                         <td className="px-6 py-3.5">
                           {formatMK(Number(row.monthly_rent))}
                         </td>
-                        <td className="px-6 py-3.5">{row.next_due_date}</td>
+                        <td className="px-6 py-3.5 font-medium text-slate-800">
+                          {row.next_due_date}
+                        </td>
                         <td className="px-6 py-3.5 font-medium text-red-600">
                           {formatMK(Number(row.current_balance))}
                         </td>
                         <td className="px-6 py-3.5 text-slate-500">
-                          {row.months_in_advance || 0} / {requiredAdvance}
+                          {row.months_in_advance || 0} / {required}
                         </td>
                         <td className="px-6 py-3.5">
                           <StatusBadge status={row.status} />
@@ -320,7 +350,7 @@ export default function LandlordDashboard() {
                 Edit Property
               </h3>
               <p className="text-sm text-slate-500 mt-0.5">
-                {editing.house_code}
+                {editing.house_code} • {editing.full_name}
               </p>
             </div>
 
@@ -336,7 +366,7 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, house_name: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
@@ -350,7 +380,7 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, full_name: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
@@ -364,7 +394,7 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, phone: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
@@ -378,13 +408,13 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, monthly_rent: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Next Due Date
+                    Paid Up To (Date)
                   </label>
                   <input
                     type="date"
@@ -392,7 +422,7 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, next_due_date: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
@@ -409,7 +439,7 @@ export default function LandlordDashboard() {
                         current_balance: e.target.value,
                       })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
@@ -426,7 +456,7 @@ export default function LandlordDashboard() {
                         months_in_advance: e.target.value,
                       })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
 
@@ -439,7 +469,7 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, status: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   >
                     <option value="upcoming">Upcoming</option>
                     <option value="overdue">Overdue</option>
@@ -457,7 +487,7 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, bank_account: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   />
                 </div>
               </div>
