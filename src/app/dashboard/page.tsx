@@ -5,7 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 
 const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 type TenantRow = {
   tenant_id: string;
@@ -61,8 +62,9 @@ export default function LandlordDashboard() {
 
   useEffect(() => {
     async function checkUserAndLoad() {
-      // Check if user is logged in
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session) {
         router.push("/auth/login");
@@ -71,7 +73,6 @@ export default function LandlordDashboard() {
 
       setCheckingAuth(false);
 
-      // Load data
       const { data, error } = await supabase
         .from("tenant_overview")
         .select("*")
@@ -182,4 +183,33 @@ export default function LandlordDashboard() {
                 </thead>
                 <tbody className="divide-y">
                   {rows.map((row) => (
-                    <tr key={row.tenant_id} className
+                    <tr key={row.tenant_id} className="hover:bg-slate-50">
+                      <td className="px-6 py-3 font-medium">{row.house_name}</td>
+                      <td className="px-6 py-3">{row.full_name}</td>
+                      <td className="px-6 py-3 text-slate-600">
+                        {row.phone || "—"}
+                      </td>
+                      <td className="px-6 py-3">
+                        {formatMK(Number(row.monthly_rent))}
+                      </td>
+                      <td className="px-6 py-3">{row.next_due_date}</td>
+                      <td className="px-6 py-3 font-medium text-red-600">
+                        {formatMK(Number(row.current_balance))}
+                      </td>
+                      <td className="px-6 py-3">
+                        <StatusBadge status={row.status} />
+                      </td>
+                      <td className="px-6 py-3 text-slate-600">
+                        {row.bank_account}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
