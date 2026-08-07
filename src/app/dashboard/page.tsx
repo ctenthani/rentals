@@ -54,8 +54,8 @@ export default function LandlordDashboard() {
   useEffect(() => {
     // Create the client only in the browser
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL!, = https://favhmbrpisstrwgytapl.supabase.co/rest/v1/
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U
     );
 
     async function loadData() {
