@@ -20,7 +20,7 @@ function formatMK(amount: number) {
 }
 
 function addMonths(dateStr: string, months: number): string {
-  const d = new Date(dateStr);
+  const d = new Date(dateStr + "T12:00:00");
   d.setMonth(d.getMonth() + months);
   return d.toISOString().split("T")[0];
 }
@@ -29,7 +29,6 @@ export default function RecordPaymentPage() {
   const [tenants, setTenants] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [amount, setAmount] = useState("");
-  const [months, setMonths] = useState("1");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -49,7 +48,6 @@ export default function RecordPaymentPage() {
         return;
       }
 
-      // Block tenants
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
@@ -61,45 +59,49 @@ export default function RecordPaymentPage() {
         return;
       }
 
-      const { data } = await supabase
-        .from("tenant_overview")
-        .select("*")
-        .order("house_code");
-
-      setTenants(data || []);
+      await loadTenants();
       setLoading(false);
     }
 
     init();
   }, [router]);
 
+  async function loadTenants() {
+    const { data } = await supabase
+      .from("tenant_overview")
+      .select("*")
+      .order("house_code");
+    setTenants(data || []);
+  }
+
   const selected = tenants.find((t) => t.tenant_id === selectedId);
+
+  // Automatically calculate how many months the amount covers
+  const monthsCovered =
+    selected && Number(amount) > 0 && Number(selected.monthly_rent) > 0
+      ? Math.round(Number(amount) / Number(selected.monthly_rent))
+      : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selected) return;
+    if (!selected || monthsCovered < 1) return;
 
     setSaving(true);
     setMessage(null);
     setError(null);
 
     const paidAmount = Number(amount);
-    const monthsCovered = Number(months);
 
-    // Calculate new values
-    const newBalance = Math.max(
-      0,
-      Number(selected.current_balance) - paidAmount
-    );
+    // New values
+    const newBalance = Math.max(0, Number(selected.current_balance) - paidAmount);
     const newDueDate = addMonths(selected.next_due_date, monthsCovered);
     const newAdvance = Number(selected.months_in_advance || 0) + monthsCovered;
 
-    // Determine status
     let newStatus = "upcoming";
-    if (newBalance === 0) newStatus = "paid";
+    if (newBalance <= 0) newStatus = "paid";
     else if (new Date(newDueDate) < new Date()) newStatus = "overdue";
 
-    // Update tenant_balances
+    // Update the balance record
     const { error: updateError } = await supabase
       .from("tenant_balances")
       .update({
@@ -116,7 +118,7 @@ export default function RecordPaymentPage() {
       return;
     }
 
-    // Also insert a record into payments (optional but useful)
+    // Save a payment record
     await supabase.from("payments").insert({
       tenant_id: selected.tenant_id,
       amount: paidAmount,
@@ -127,19 +129,12 @@ export default function RecordPaymentPage() {
     });
 
     setMessage(
-      `Payment of ${formatMK(paidAmount)} recorded. Paid up to ${newDueDate}. New balance: ${formatMK(newBalance)}`
+      `Payment of ${formatMK(paidAmount)} recorded (${monthsCovered} month${monthsCovered > 1 ? "s" : ""}). Paid up to ${newDueDate}. New balance: ${formatMK(newBalance)}`
     );
+
     setAmount("");
-    setMonths("1");
     setSelectedId("");
-
-    // Refresh list
-    const { data } = await supabase
-      .from("tenant_overview")
-      .select("*")
-      .order("house_code");
-    setTenants(data || []);
-
+    await loadTenants();
     setSaving(false);
   };
 
@@ -178,8 +173,7 @@ export default function RecordPaymentPage() {
                 <option value="">— Choose tenant —</option>
                 {tenants.map((t) => (
                   <option key={t.tenant_id} value={t.tenant_id}>
-                    {t.house_name} – {t.full_name} (Balance:{" "}
-                    {formatMK(Number(t.current_balance))})
+                    {t.house_name} – {t.full_name} (Balance: {formatMK(Number(t.current_balance))})
                   </option>
                 ))}
               </select>
@@ -202,40 +196,36 @@ export default function RecordPaymentPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Amount Received (MK)
-                </label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  min="1"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                  placeholder="e.g. 360000"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Months Covered
-                </label>
-                <select
-                  value={months}
-                  onChange={(e) => setMonths(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                >
-                  <option value="1">1 month</option>
-                  <option value="2">2 months</option>
-                  <option value="3">3 months</option>
-                  <option value="4">4 months</option>
-                  <option value="5">5 months</option>
-                  <option value="6">6 months</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Amount Received (MK)
+              </label>
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+                min="1"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                placeholder="e.g. 360000"
+              />
             </div>
+
+            {selected && Number(amount) > 0 && (
+              <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-sm">
+                <p className="font-medium text-green-800">
+                  This amount covers approximately <strong>{monthsCovered}</strong> month{monthsCovered !== 1 ? "s" : ""}
+                </p>
+                <p className="text-green-700 mt-1">
+                  New Paid Up To date will be:{" "}
+                  <strong>
+                    {monthsCovered > 0
+                      ? addMonths(selected.next_due_date, monthsCovered)
+                      : "—"}
+                  </strong>
+                </p>
+              </div>
+            )}
 
             {message && (
               <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 text-sm">
@@ -251,7 +241,7 @@ export default function RecordPaymentPage() {
 
             <button
               type="submit"
-              disabled={saving || !selectedId}
+              disabled={saving || !selectedId || monthsCovered < 1}
               className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium py-3 rounded-xl"
             >
               {saving ? "Saving..." : "Record Payment"}
