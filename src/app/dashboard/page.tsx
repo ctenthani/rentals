@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
+
 type TenantRow = {
   tenant_id: string;
   full_name: string;
@@ -52,11 +55,7 @@ export default function LandlordDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Create the client only in the browser
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!, = https://favhmbrpisstrwgytapl.supabase.co/rest/v1/
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U
-    );
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     async function loadData() {
       setLoading(true);
@@ -94,7 +93,6 @@ export default function LandlordDashboard() {
       <div className="max-w-7xl mx-auto">
         <h1 className="text-2xl font-bold mb-6">Landlord Dashboard</h1>
 
-        {/* Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-xl border p-5">
             <p className="text-sm text-slate-500">Expected Rent</p>
@@ -122,14 +120,12 @@ export default function LandlordDashboard() {
           </div>
         </div>
 
-        {/* Error message */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             Error loading data: {error}
           </div>
         )}
 
-        {/* Houses Table */}
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="px-6 py-4 border-b">
             <h2 className="font-semibold">All Houses & Tenants</h2>
@@ -155,16 +151,10 @@ export default function LandlordDashboard() {
                 <tbody className="divide-y">
                   {rows.map((row) => (
                     <tr key={row.tenant_id} className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-medium">
-                        {row.house_name}
-                      </td>
+                      <td className="px-6 py-3 font-medium">{row.house_name}</td>
                       <td className="px-6 py-3">{row.full_name}</td>
-                      <td className="px-6 py-3 text-slate-600">
-                        {row.phone || "—"}
-                      </td>
-                      <td className="px-6 py-3">
-                        {formatMK(Number(row.monthly_rent))}
-                      </td>
+                      <td className="px-6 py-3 text-slate-600">{row.phone || "—"}</td>
+                      <td className="px-6 py-3">{formatMK(Number(row.monthly_rent))}</td>
                       <td className="px-6 py-3">{row.next_due_date}</td>
                       <td className="px-6 py-3 font-medium text-red-600">
                         {formatMK(Number(row.current_balance))}
@@ -172,9 +162,7 @@ export default function LandlordDashboard() {
                       <td className="px-6 py-3">
                         <StatusBadge status={row.status} />
                       </td>
-                      <td className="px-6 py-3 text-slate-600">
-                        {row.bank_account}
-                      </td>
+                      <td className="px-6 py-3 text-slate-600">{row.bank_account}</td>
                     </tr>
                   ))}
                 </tbody>
