@@ -19,10 +19,32 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    paid: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20",
+    overdue: "bg-red-50 text-red-700 ring-1 ring-red-600/20",
+    upcoming: "bg-sky-50 text-sky-700 ring-1 ring-sky-600/20",
+    pending: "bg-amber-50 text-amber-700 ring-1 ring-amber-600/20",
+    confirmed: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20",
+    rejected: "bg-red-50 text-red-700 ring-1 ring-red-600/20",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+        styles[status] || "bg-slate-100 text-slate-600"
+      }`}
+    >
+      {status?.toUpperCase()}
+    </span>
+  );
+}
+
 export default function TenantPortal() {
   const [tenant, setTenant] = useState<any>(null);
   const [house, setHouse] = useState<any>(null);
   const [balance, setBalance] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -30,7 +52,7 @@ export default function TenantPortal() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
-    async function loadTenant() {
+    async function load() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -40,7 +62,7 @@ export default function TenantPortal() {
         return;
       }
 
-      // 1. Get the tenant
+      // Get tenant
       const { data: tenantData, error: tenantError } = await supabase
         .from("tenants")
         .select("id, full_name, phone, house_id")
@@ -57,16 +79,15 @@ export default function TenantPortal() {
 
       setTenant(tenantData);
 
-      // 2. Get the house
+      // Get house
       const { data: houseData } = await supabase
         .from("houses")
         .select("code, name, monthly_rent, bank_account")
         .eq("id", tenantData.house_id)
         .single();
-
       setHouse(houseData);
 
-      // 3. Get the balance
+      // Get balance
       const { data: balanceData } = await supabase
         .from("tenant_balances")
         .select(
@@ -74,12 +95,21 @@ export default function TenantPortal() {
         )
         .eq("tenant_id", tenantData.id)
         .single();
-
       setBalance(balanceData);
+
+      // Get payment history (submissions)
+      const { data: historyData } = await supabase
+        .from("payment_submissions")
+        .select("id, amount, method, status, paid_date, created_at, reference_used")
+        .eq("tenant_id", tenantData.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      setHistory(historyData || []);
       setLoading(false);
     }
 
-    loadTenant();
+    load();
   }, [router]);
 
   const handleLogout = async () => {
@@ -89,7 +119,7 @@ export default function TenantPortal() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <p className="text-slate-500">Loading...</p>
       </div>
     );
@@ -97,12 +127,12 @@ export default function TenantPortal() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-white border rounded-xl p-6 max-w-md text-center">
-          <p className="text-red-600 mb-4">{error}</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-md text-center shadow-sm">
+          <p className="text-red-600 mb-6">{error}</p>
           <button
             onClick={handleLogout}
-            className="text-sm border px-4 py-2 rounded-lg"
+            className="text-sm border border-slate-200 px-5 py-2.5 rounded-xl"
           >
             Logout
           </button>
@@ -111,83 +141,141 @@ export default function TenantPortal() {
     );
   }
 
+  const requiredAdvance = [
+    "Joe Lipanda",
+    "Elias Chisoni",
+    "Emily Mwakisephile",
+    "Gift Mphande",
+  ].includes(tenant?.full_name)
+    ? 3
+    : 2;
+
   return (
-    <main className="min-h-screen bg-slate-50 p-4">
-      <div className="max-w-lg mx-auto space-y-4">
-        <div className="flex justify-between items-center">
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="bg-white border-b sticky top-0 z-30">
+        <div className="max-w-lg mx-auto px-4 h-14 flex justify-between items-center">
           <div>
-            <p className="text-sm text-slate-500">Welcome</p>
-            <h1 className="text-xl font-bold">{tenant?.full_name}</h1>
+            <p className="text-xs text-slate-500">Welcome</p>
+            <p className="font-semibold text-slate-800 leading-tight">
+              {tenant?.full_name}
+            </p>
           </div>
           <button
             onClick={handleLogout}
-            className="text-sm text-slate-600 border px-3 py-1.5 rounded-lg"
+            className="text-sm text-slate-500 hover:text-slate-800"
           >
             Logout
           </button>
         </div>
+      </header>
 
-        <div className="bg-white rounded-xl border p-5">
-          <p className="text-sm text-slate-500 mb-1">{house?.name}</p>
-          <p className="font-medium text-lg capitalize mb-4">
-            {balance?.status || "—"}
-          </p>
+      <main className="max-w-lg mx-auto px-4 py-6 space-y-5">
+        {/* Status Card */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 pt-5 pb-4">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-sm text-slate-500">{house?.name}</p>
+                <div className="mt-1.5">
+                  <StatusBadge status={balance?.status || "upcoming"} />
+                </div>
+              </div>
+            </div>
 
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Next Due Date</span>
-              <span className="font-medium">
-                {balance?.next_due_date || "—"}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Outstanding Balance</span>
-              <span className="font-bold text-red-600 text-lg">
-                {formatMK(Number(balance?.current_balance || 0))}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Monthly Rent</span>
-              <span className="font-medium">
-                {formatMK(Number(house?.monthly_rent || 0))}
-              </span>
-            </div>
-            {balance?.months_in_advance > 0 && (
-              <div className="flex justify-between">
-                <span className="text-slate-600">Months in Advance</span>
-                <span className="font-medium text-green-600">
-                  {balance.months_in_advance}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Next Due Date</span>
+                <span className="font-medium text-slate-800">
+                  {balance?.next_due_date || "—"}
                 </span>
               </div>
-            )}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Outstanding Balance</span>
+                <span className="text-xl font-semibold text-red-600">
+                  {formatMK(Number(balance?.current_balance || 0))}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Monthly Rent</span>
+                <span className="font-medium text-slate-800">
+                  {formatMK(Number(house?.monthly_rent || 0))}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Months in Advance</span>
+                <span className="font-medium text-slate-800">
+                  {balance?.months_in_advance || 0} / {requiredAdvance} required
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
+        {/* Make Payment Button */}
         <Link
           href="/pay"
-          className="block w-full bg-green-600 hover:bg-green-700 text-white text-center font-medium py-3.5 rounded-xl"
+          className="flex items-center justify-center w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3.5 rounded-2xl shadow-sm transition"
         >
           Make Payment
         </Link>
 
-        <div className="bg-white rounded-xl border p-5 text-sm space-y-2">
-          <h3 className="font-medium mb-2">Payment Details</h3>
-          <p>
-            <span className="text-slate-500">Bank:</span> National Bank of
-            Malawi
-          </p>
-          <p>
-            <span className="text-slate-500">Account:</span>{" "}
-            <strong>{house?.bank_account || "—"}</strong>
-          </p>
-          <p>
-            <span className="text-slate-500">Reference:</span>{" "}
-            <strong>
-              {house?.code}-{tenant?.full_name?.replace(/\s+/g, "")}
-            </strong>
+        {/* Bank Details */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h3 className="font-semibold text-slate-800 mb-3">Payment Details</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Bank</span>
+              <span className="font-medium">National Bank of Malawi</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Account</span>
+              <span className="font-medium">{house?.bank_account}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Reference</span>
+              <span className="font-medium">
+                {house?.code}-{tenant?.full_name?.replace(/\s+/g, "")}
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 mt-3">
+            Always use the exact reference so your payment can be matched quickly.
           </p>
         </div>
-      </div>
-    </main>
+
+        {/* Payment History */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800">Payment History</h3>
+          </div>
+
+          {history.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-slate-400">
+              No payments yet
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {history.map((item) => (
+                <div
+                  key={item.id}
+                  className="px-5 py-3.5 flex justify-between items-center"
+                >
+                  <div>
+                    <p className="font-medium text-slate-800">
+                      {formatMK(Number(item.amount))}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {item.method} • {item.paid_date}
+                    </p>
+                  </div>
+                  <StatusBadge status={item.status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }
