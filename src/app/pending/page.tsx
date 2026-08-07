@@ -19,25 +19,8 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
-type Submission = {
-  id: string;
-  amount: number;
-  method: string;
-  reference_used: string;
-  paid_date: string;
-  status: string;
-  created_at: string;
-  tenants: {
-    full_name: string;
-    houses: {
-      name: string;
-      code: string;
-    };
-  };
-};
-
 export default function PendingPaymentsPage() {
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -92,7 +75,7 @@ export default function PendingPaymentsPage() {
     }
   }
 
-  const handleConfirm = async (submission: Submission) => {
+  const handleConfirm = async (submission: any) => {
     setProcessing(submission.id);
     setMessage(null);
 
@@ -167,10 +150,11 @@ export default function PendingPaymentsPage() {
           <div className="space-y-4">
             {submissions.map((sub) => {
               const tenantName = sub.tenants?.full_name || "Unknown";
-              const houseName =
-                (Array.isArray(sub.tenants?.houses)
-                  ? sub.tenants.houses[0]?.name
-                  : sub.tenants?.houses?.name) || "—";
+              const house =
+                Array.isArray(sub.tenants?.houses)
+                  ? sub.tenants.houses[0]
+                  : sub.tenants?.houses;
+              const houseName = house?.name || "—";
 
               return (
                 <div
@@ -184,8 +168,7 @@ export default function PendingPaymentsPage() {
                       {formatMK(Number(sub.amount))}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {sub.method} • {sub.paid_date} • Ref:{" "}
-                      {sub.reference_used}
+                      {sub.method} • {sub.paid_date} • Ref: {sub.reference_used}
                     </p>
                   </div>
 
