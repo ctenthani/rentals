@@ -19,6 +19,25 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
+function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
+  if (!nextDueDate) return "—";
+
+  const months: string[] = [];
+  const d = new Date(nextDueDate + "T12:00:00");
+  d.setMonth(d.getMonth() - 1);
+
+  const count = Math.max(monthsInAdvance || 1, 1);
+
+  for (let i = 0; i < count; i++) {
+    months.unshift(
+      d.toLocaleString("en", { month: "short", year: "numeric" })
+    );
+    d.setMonth(d.getMonth() - 1);
+  }
+
+  return months.join(", ");
+}
+
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     paid: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20",
@@ -62,7 +81,6 @@ export default function TenantPortal() {
         return;
       }
 
-      // Get tenant
       const { data: tenantData, error: tenantError } = await supabase
         .from("tenants")
         .select("id, full_name, phone, house_id")
@@ -79,7 +97,6 @@ export default function TenantPortal() {
 
       setTenant(tenantData);
 
-      // Get house
       const { data: houseData } = await supabase
         .from("houses")
         .select("code, name, monthly_rent, bank_account")
@@ -87,7 +104,6 @@ export default function TenantPortal() {
         .single();
       setHouse(houseData);
 
-      // Get balance
       const { data: balanceData } = await supabase
         .from("tenant_balances")
         .select(
@@ -97,10 +113,11 @@ export default function TenantPortal() {
         .single();
       setBalance(balanceData);
 
-      // Get payment history (submissions)
       const { data: historyData } = await supabase
         .from("payment_submissions")
-        .select("id, amount, method, status, paid_date, created_at, reference_used")
+        .select(
+          "id, amount, method, status, paid_date, created_at, reference_used"
+        )
         .eq("tenant_id", tenantData.id)
         .order("created_at", { ascending: false })
         .limit(10);
@@ -152,7 +169,6 @@ export default function TenantPortal() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <header className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-lg mx-auto px-4 h-14 flex justify-between items-center">
           <div>
@@ -171,7 +187,6 @@ export default function TenantPortal() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-5">
-        {/* Status Card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-5 pt-5 pb-4">
             <div className="flex justify-between items-start mb-4">
@@ -184,35 +199,47 @@ export default function TenantPortal() {
             </div>
 
             <div className="space-y-3">
+              <div className="flex justify-between items-start">
+                <span className="text-sm text-slate-500">Paid Months</span>
+                <span className="font-medium text-slate-800 text-right max-w-[60%]">
+                  {getPaidMonths(
+                    balance?.next_due_date,
+                    Number(balance?.months_in_advance || 1)
+                  )}
+                </span>
+              </div>
+
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-500">Next Due Date</span>
                 <span className="font-medium text-slate-800">
                   {balance?.next_due_date || "—"}
                 </span>
               </div>
+
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-500">Outstanding Balance</span>
                 <span className="text-xl font-semibold text-red-600">
                   {formatMK(Number(balance?.current_balance || 0))}
                 </span>
               </div>
+
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-500">Monthly Rent</span>
                 <span className="font-medium text-slate-800">
                   {formatMK(Number(house?.monthly_rent || 0))}
                 </span>
               </div>
+
               <div className="flex justify-between items-center">
-                <span className="text-sm text-slate-500">Months in Advance</span>
+                <span className="text-sm text-slate-500">Advance Required</span>
                 <span className="font-medium text-slate-800">
-                  {balance?.months_in_advance || 0} / {requiredAdvance} required
+                  {balance?.months_in_advance || 0} / {requiredAdvance} months
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Make Payment Button */}
         <Link
           href="/pay"
           className="flex items-center justify-center w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3.5 rounded-2xl shadow-sm transition"
@@ -220,7 +247,6 @@ export default function TenantPortal() {
           Make Payment
         </Link>
 
-        {/* Bank Details */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <h3 className="font-semibold text-slate-800 mb-3">Payment Details</h3>
           <div className="space-y-2 text-sm">
@@ -240,11 +266,11 @@ export default function TenantPortal() {
             </div>
           </div>
           <p className="text-xs text-slate-400 mt-3">
-            Always use the exact reference so your payment can be matched quickly.
+            Always use the exact reference so your payment can be matched
+            quickly.
           </p>
         </div>
 
-        {/* Payment History */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
             <h3 className="font-semibold text-slate-800">Payment History</h3>
