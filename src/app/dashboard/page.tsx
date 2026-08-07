@@ -9,6 +9,14 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
+// Tenants who must pay 3 months in advance
+const THREE_MONTHS_TENANTS = [
+  "Joe Lipanda",
+  "Elias Chisoni",
+  "Emily Mwakisephile",
+  "Gift Mphande",
+];
+
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
     style: "currency",
@@ -20,16 +28,16 @@ function formatMK(amount: number) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    paid: "bg-green-100 text-green-800",
-    overdue: "bg-red-100 text-red-800",
-    upcoming: "bg-blue-100 text-blue-800",
+  const styles: Record<string, string> = {
+    paid: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20",
+    overdue: "bg-red-50 text-red-700 ring-1 ring-red-600/20",
+    upcoming: "bg-sky-50 text-sky-700 ring-1 ring-sky-600/20",
   };
 
   return (
     <span
-      className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
-        colors[status] || "bg-gray-100 text-gray-800"
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+        styles[status] || "bg-slate-100 text-slate-600"
       }`}
     >
       {status?.toUpperCase()}
@@ -59,6 +67,18 @@ export default function LandlordDashboard() {
         return;
       }
 
+      // If this user is linked to a tenant → send them to Tenant Portal
+      const { data: tenantCheck } = await supabase
+        .from("tenants")
+        .select("id")
+        .eq("auth_user_id", session.user.id)
+        .maybeSingle();
+
+      if (tenantCheck) {
+        router.push("/tenant");
+        return;
+      }
+
       setCheckingAuth(false);
       await loadData();
     }
@@ -73,11 +93,8 @@ export default function LandlordDashboard() {
       .select("*")
       .order("house_code");
 
-    if (error) {
-      setError(error.message);
-    } else {
-      setRows(data || []);
-    }
+    if (error) setError(error.message);
+    else setRows(data || []);
     setLoading(false);
   }
 
@@ -93,41 +110,37 @@ export default function LandlordDashboard() {
   const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
+    setError(null);
 
-    // Update tenant_balances
-    const { error: balError } = await supabase
+    // Update balance
+    await supabase
       .from("tenant_balances")
       .update({
         next_due_date: editing.next_due_date,
         current_balance: Number(editing.current_balance),
         status: editing.status,
+        months_in_advance: Number(editing.months_in_advance || 0),
       })
       .eq("tenant_id", editing.tenant_id);
 
-    // Update houses
-    const { error: houseError } = await supabase
+    // Update house
+    await supabase
       .from("houses")
       .update({
+        name: editing.house_name,
         monthly_rent: Number(editing.monthly_rent),
         bank_account: editing.bank_account,
       })
       .eq("code", editing.house_code);
 
-    // Update tenant phone
-    const { error: tenantError } = await supabase
+    // Update tenant
+    await supabase
       .from("tenants")
       .update({
+        full_name: editing.full_name,
         phone: editing.phone,
       })
       .eq("id", editing.tenant_id);
-
-    if (balError || houseError || tenantError) {
-      setError(
-        balError?.message || houseError?.message || tenantError?.message || "Error saving"
-      );
-      setSaving(false);
-      return;
-    }
 
     setEditing(null);
     setSaving(false);
@@ -136,8 +149,8 @@ export default function LandlordDashboard() {
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-500">Checking login...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-slate-500">Loading...</p>
       </div>
     );
   }
@@ -152,23 +165,25 @@ export default function LandlordDashboard() {
   );
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* Top Navigation */}
-      <header className="bg-white border-b">
+    <div className="min-h-screen bg-slate-50">
+      {/* Navigation */}
+      <header className="bg-white border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-14">
-            <div className="flex items-center gap-6">
-              <span className="font-bold text-lg">Rental Manager</span>
-              <nav className="flex gap-4 text-sm">
+            <div className="flex items-center gap-8">
+              <span className="font-bold text-slate-800 tracking-tight">
+                Rental Manager
+              </span>
+              <nav className="hidden sm:flex items-center gap-1">
                 <Link
                   href="/dashboard"
-                  className="font-medium text-green-700 border-b-2 border-green-600 pb-3.5"
+                  className="px-3 py-2 text-sm font-medium text-green-700 bg-green-50 rounded-lg"
                 >
                   Dashboard
                 </Link>
                 <Link
                   href="/pending"
-                  className="text-slate-600 hover:text-slate-900 pb-3.5"
+                  className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
                 >
                   Pending Payments
                 </Link>
@@ -176,7 +191,7 @@ export default function LandlordDashboard() {
             </div>
             <button
               onClick={handleLogout}
-              className="text-sm text-slate-600 hover:text-slate-900"
+              className="text-sm text-slate-500 hover:text-slate-800"
             >
               Logout
             </button>
@@ -184,204 +199,281 @@ export default function LandlordDashboard() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto p-4 sm:p-6">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-xl border p-5">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        {/* Summary */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Expected Rent</p>
-            <p className="text-2xl font-bold mt-1">
+            <p className="text-2xl font-semibold mt-1 tracking-tight">
               {loading ? "—" : formatMK(totalExpected)}
             </p>
           </div>
-          <div className="bg-white rounded-xl border p-5">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Outstanding</p>
-            <p className="text-2xl font-bold mt-1 text-red-600">
+            <p className="text-2xl font-semibold mt-1 tracking-tight text-red-600">
               {loading ? "—" : formatMK(totalOutstanding)}
             </p>
           </div>
-          <div className="bg-white rounded-xl border p-5">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Occupied</p>
-            <p className="text-2xl font-bold mt-1">
+            <p className="text-2xl font-semibold mt-1 tracking-tight">
               {loading ? "—" : `${rows.length} / 10`}
             </p>
           </div>
-          <div className="bg-white rounded-xl border p-5">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Occupancy</p>
-            <p className="text-2xl font-bold mt-1">
-              {loading ? "—" : "100%"}
-            </p>
+            <p className="text-2xl font-semibold mt-1 tracking-tight">100%</p>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
             {error}
           </div>
         )}
 
-        {/* Houses Table */}
-        <div className="bg-white rounded-xl border overflow-hidden">
-          <div className="px-6 py-4 border-b">
-            <h2 className="font-semibold">All Houses & Tenants</h2>
+        {/* Table Card */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+            <h2 className="font-semibold text-slate-800">All Houses & Tenants</h2>
+            <span className="text-xs text-slate-500">
+              3 months advance: Lipanda, Chisoni, Emily, Gift Mphande
+            </span>
           </div>
 
           {loading ? (
-            <div className="p-8 text-center text-slate-500">Loading...</div>
+            <div className="p-12 text-center text-slate-400">Loading...</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left">
-                  <tr>
+                <thead>
+                  <tr className="bg-slate-50/80 text-left text-slate-500">
                     <th className="px-6 py-3 font-medium">House</th>
                     <th className="px-6 py-3 font-medium">Tenant</th>
                     <th className="px-6 py-3 font-medium">Phone</th>
                     <th className="px-6 py-3 font-medium">Rent</th>
                     <th className="px-6 py-3 font-medium">Next Due</th>
                     <th className="px-6 py-3 font-medium">Balance</th>
+                    <th className="px-6 py-3 font-medium">Advance</th>
                     <th className="px-6 py-3 font-medium">Status</th>
                     <th className="px-6 py-3 font-medium">Bank</th>
-                    <th className="px-6 py-3 font-medium">Action</th>
+                    <th className="px-6 py-3 font-medium"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
-                  {rows.map((row) => (
-                    <tr key={row.tenant_id} className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-medium">{row.house_name}</td>
-                      <td className="px-6 py-3">{row.full_name}</td>
-                      <td className="px-6 py-3 text-slate-600">
-                        {row.phone || "—"}
-                      </td>
-                      <td className="px-6 py-3">
-                        {formatMK(Number(row.monthly_rent))}
-                      </td>
-                      <td className="px-6 py-3">{row.next_due_date}</td>
-                      <td className="px-6 py-3 font-medium text-red-600">
-                        {formatMK(Number(row.current_balance))}
-                      </td>
-                      <td className="px-6 py-3">
-                        <StatusBadge status={row.status} />
-                      </td>
-                      <td className="px-6 py-3 text-slate-600">
-                        {row.bank_account}
-                      </td>
-                      <td className="px-6 py-3">
-                        <button
-                          onClick={() => openEdit(row)}
-                          className="text-green-700 hover:underline text-sm"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((row) => {
+                    const requiredAdvance = THREE_MONTHS_TENANTS.includes(
+                      row.full_name
+                    )
+                      ? 3
+                      : 2;
+
+                    return (
+                      <tr key={row.tenant_id} className="hover:bg-slate-50/50">
+                        <td className="px-6 py-3.5 font-medium text-slate-800">
+                          {row.house_name}
+                        </td>
+                        <td className="px-6 py-3.5">{row.full_name}</td>
+                        <td className="px-6 py-3.5 text-slate-500">
+                          {row.phone || "—"}
+                        </td>
+                        <td className="px-6 py-3.5">
+                          {formatMK(Number(row.monthly_rent))}
+                        </td>
+                        <td className="px-6 py-3.5">{row.next_due_date}</td>
+                        <td className="px-6 py-3.5 font-medium text-red-600">
+                          {formatMK(Number(row.current_balance))}
+                        </td>
+                        <td className="px-6 py-3.5 text-slate-500">
+                          {row.months_in_advance || 0} / {requiredAdvance}
+                        </td>
+                        <td className="px-6 py-3.5">
+                          <StatusBadge status={row.status} />
+                        </td>
+                        <td className="px-6 py-3.5 text-slate-500">
+                          {row.bank_account}
+                        </td>
+                        <td className="px-6 py-3.5">
+                          <button
+                            onClick={() => openEdit(row)}
+                            className="text-green-700 hover:text-green-800 font-medium text-sm"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
-      </div>
+      </main>
 
       {/* Edit Modal */}
       {editing && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
-            <h3 className="text-lg font-bold">
-              Edit – {editing.house_name}
-            </h3>
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-semibold text-slate-800">
+                Edit Property
+              </h3>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {editing.house_code}
+              </p>
+            </div>
 
-            <div className="space-y-3 text-sm">
-              <div>
-                <label className="block text-slate-600 mb-1">Tenant Phone</label>
-                <input
-                  type="text"
-                  value={editing.phone || ""}
-                  onChange={(e) =>
-                    setEditing({ ...editing, phone: e.target.value })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    House Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editing.house_name || ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, house_name: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-slate-600 mb-1">Monthly Rent</label>
-                <input
-                  type="number"
-                  value={editing.monthly_rent}
-                  onChange={(e) =>
-                    setEditing({ ...editing, monthly_rent: e.target.value })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Tenant Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editing.full_name || ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, full_name: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-slate-600 mb-1">Next Due Date</label>
-                <input
-                  type="date"
-                  value={editing.next_due_date}
-                  onChange={(e) =>
-                    setEditing({ ...editing, next_due_date: e.target.value })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={editing.phone || ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, phone: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-slate-600 mb-1">
-                  Current Balance
-                </label>
-                <input
-                  type="number"
-                  value={editing.current_balance}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      current_balance: e.target.value,
-                    })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Monthly Rent
+                  </label>
+                  <input
+                    type="number"
+                    value={editing.monthly_rent}
+                    onChange={(e) =>
+                      setEditing({ ...editing, monthly_rent: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-slate-600 mb-1">Status</label>
-                <select
-                  value={editing.status}
-                  onChange={(e) =>
-                    setEditing({ ...editing, status: e.target.value })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                >
-                  <option value="upcoming">Upcoming</option>
-                  <option value="overdue">Overdue</option>
-                  <option value="paid">Paid</option>
-                </select>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Next Due Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editing.next_due_date}
+                    onChange={(e) =>
+                      setEditing({ ...editing, next_due_date: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-slate-600 mb-1">Bank Account</label>
-                <input
-                  type="text"
-                  value={editing.bank_account}
-                  onChange={(e) =>
-                    setEditing({ ...editing, bank_account: e.target.value })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Current Balance
+                  </label>
+                  <input
+                    type="number"
+                    value={editing.current_balance}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        current_balance: e.target.value,
+                      })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Months in Advance
+                  </label>
+                  <input
+                    type="number"
+                    value={editing.months_in_advance || 0}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        months_in_advance: e.target.value,
+                      })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Status
+                  </label>
+                  <select
+                    value={editing.status}
+                    onChange={(e) =>
+                      setEditing({ ...editing, status: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  >
+                    <option value="upcoming">Upcoming</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="paid">Paid</option>
+                  </select>
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Bank Account
+                  </label>
+                  <input
+                    type="text"
+                    value={editing.bank_account}
+                    onChange={(e) =>
+                      setEditing({ ...editing, bank_account: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="flex gap-3 pt-2">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-lg font-medium"
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-medium text-sm transition"
               >
                 {saving ? "Saving..." : "Save Changes"}
               </button>
               <button
                 onClick={() => setEditing(null)}
-                className="px-4 border rounded-lg"
+                className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-white transition"
               >
                 Cancel
               </button>
@@ -389,6 +481,6 @@ export default function LandlordDashboard() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }
