@@ -76,7 +76,6 @@ export default function RecordPaymentPage() {
 
   const selected = tenants.find((t) => t.tenant_id === selectedId);
 
-  // Automatically calculate how many months the amount covers
   const monthsCovered =
     selected && Number(amount) > 0 && Number(selected.monthly_rent) > 0
       ? Math.round(Number(amount) / Number(selected.monthly_rent))
@@ -90,46 +89,29 @@ export default function RecordPaymentPage() {
     setMessage(null);
     setError(null);
 
-    const paidAmount = Number(amount);
+    const { data, error: rpcError } = await supabase.rpc(
+      "record_landlord_payment",
+      {
+        p_tenant_id: selected.tenant_id,
+        p_amount: Number(amount),
+        p_months: monthsCovered,
+      }
+    );
 
-    // New values
-    const newBalance = Math.max(0, Number(selected.current_balance) - paidAmount);
-    const newDueDate = addMonths(selected.next_due_date, monthsCovered);
-    const newAdvance = Number(selected.months_in_advance || 0) + monthsCovered;
-
-    let newStatus = "upcoming";
-    if (newBalance <= 0) newStatus = "paid";
-    else if (new Date(newDueDate) < new Date()) newStatus = "overdue";
-
-    // Update the balance record
-    const { error: updateError } = await supabase
-      .from("tenant_balances")
-      .update({
-        current_balance: newBalance,
-        next_due_date: newDueDate,
-        months_in_advance: newAdvance,
-        status: newStatus,
-      })
-      .eq("tenant_id", selected.tenant_id);
-
-    if (updateError) {
-      setError(updateError.message);
+    if (rpcError) {
+      setError(rpcError.message);
       setSaving(false);
       return;
     }
 
-    // Save a payment record
-    await supabase.from("payments").insert({
-      tenant_id: selected.tenant_id,
-      amount: paidAmount,
-      method: "Manual Entry",
-      paid_date: new Date().toISOString().split("T")[0],
-      months_covered: monthsCovered,
-      notes: "Recorded by landlord",
-    });
+    if (data && data.success === false) {
+      setError(data.error || "Failed to record payment");
+      setSaving(false);
+      return;
+    }
 
     setMessage(
-      `Payment of ${formatMK(paidAmount)} recorded (${monthsCovered} month${monthsCovered > 1 ? "s" : ""}). Paid up to ${newDueDate}. New balance: ${formatMK(newBalance)}`
+      `Payment of ${formatMK(Number(amount))} recorded (${monthsCovered} month${monthsCovered > 1 ? "s" : ""}). Paid up to ${data.new_due_date}. New balance: ${formatMK(data.new_balance)}`
     );
 
     setAmount("");
@@ -173,7 +155,8 @@ export default function RecordPaymentPage() {
                 <option value="">— Choose tenant —</option>
                 {tenants.map((t) => (
                   <option key={t.tenant_id} value={t.tenant_id}>
-                    {t.house_name} – {t.full_name} (Balance: {formatMK(Number(t.current_balance))})
+                    {t.house_name} – {t.full_name} (Balance:{" "}
+                    {formatMK(Number(t.current_balance))})
                   </option>
                 ))}
               </select>
@@ -214,7 +197,9 @@ export default function RecordPaymentPage() {
             {selected && Number(amount) > 0 && (
               <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-sm">
                 <p className="font-medium text-green-800">
-                  This amount covers approximately <strong>{monthsCovered}</strong> month{monthsCovered !== 1 ? "s" : ""}
+                  This amount covers approximately{" "}
+                  <strong>{monthsCovered}</strong> month
+                  {monthsCovered !== 1 ? "s" : ""}
                 </p>
                 <p className="text-green-700 mt-1">
                   New Paid Up To date will be:{" "}
