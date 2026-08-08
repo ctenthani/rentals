@@ -31,8 +31,6 @@ function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
 
   const months: string[] = [];
   const d = new Date(nextDueDate + "T12:00:00");
-
-  // Go back one month from next_due_date (last paid month)
   d.setMonth(d.getMonth() - 1);
 
   const count = Math.max(monthsInAdvance || 1, 1);
@@ -200,6 +198,7 @@ export default function LandlordDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Navigation */}
       <header className="bg-white border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-14">
@@ -226,6 +225,12 @@ export default function LandlordDashboard() {
                 >
                   Record Payment
                 </Link>
+                <Link
+                  href="/payments"
+                  className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
+                >
+                  Payments
+                </Link>
               </nav>
             </div>
             <button
@@ -239,6 +244,7 @@ export default function LandlordDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Expected Rent</p>
@@ -276,6 +282,7 @@ export default function LandlordDashboard() {
           </div>
         )}
 
+        {/* Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
             <h2 className="font-semibold text-slate-800">
@@ -353,6 +360,7 @@ export default function LandlordDashboard() {
         </div>
       </main>
 
+      {/* Edit Modal */}
       {editing && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
