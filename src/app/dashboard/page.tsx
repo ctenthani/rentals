@@ -125,45 +125,35 @@ export default function LandlordDashboard() {
     setError(null);
   };
 
-  const handleSave = async () => {
+    const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
 
     try {
-      const { error: balError } = await supabase
-        .from("tenant_balances")
-        .update({
-          next_due_date: editing.next_due_date,
-          current_balance: Number(editing.current_balance),
-          status: editing.status,
-          months_in_advance: Number(editing.months_in_advance || 0),
-        })
-        .eq("tenant_id", editing.tenant_id);
+      const { data, error: rpcError } = await supabase.rpc(
+        "landlord_update_tenant",
+        {
+          p_tenant_id: editing.tenant_id,
+          p_full_name: editing.full_name,
+          p_phone: editing.phone || null,
+          p_house_code: editing.house_code,
+          p_house_name: editing.house_name,
+          p_monthly_rent: Number(editing.monthly_rent),
+          p_bank_account: editing.bank_account,
+          p_next_due_date: editing.next_due_date,
+          p_current_balance: Number(editing.current_balance),
+          p_status: editing.status,
+          p_months_in_advance: Number(editing.months_in_advance || 0),
+        }
+      );
 
-      if (balError) throw balError;
+      if (rpcError) throw rpcError;
 
-      const { error: houseError } = await supabase
-        .from("houses")
-        .update({
-          name: editing.house_name,
-          monthly_rent: Number(editing.monthly_rent),
-          bank_account: editing.bank_account,
-        })
-        .eq("code", editing.house_code);
-
-      if (houseError) throw houseError;
-
-      const { error: tenantError } = await supabase
-        .from("tenants")
-        .update({
-          full_name: editing.full_name,
-          phone: editing.phone,
-        })
-        .eq("id", editing.tenant_id);
-
-      if (tenantError) throw tenantError;
+      if (data && data.success === false) {
+        throw new Error(data.error || "Update failed");
+      }
 
       setSuccess("Changes saved successfully");
       setEditing(null);
