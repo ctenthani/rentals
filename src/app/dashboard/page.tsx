@@ -414,7 +414,20 @@ export default function LandlordDashboard() {
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
                   />
                 </div>
-
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={editing.email || ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, email: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                    placeholder="tenant@gmail.com"
+                  />
+                </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Tenant Name
