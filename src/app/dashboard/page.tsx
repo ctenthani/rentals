@@ -24,11 +24,8 @@ function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
 
   const months: string[] = [];
   const d = new Date(nextDueDate + "T12:00:00");
-
-  // Last paid month is the month before next_due_date
   d.setMonth(d.getMonth() - 1);
 
-  // Show at least 6 months, or more if they have higher advance
   const count = Math.max(Number(monthsInAdvance) || 0, 6);
 
   for (let i = 0; i < count; i++) {
@@ -82,6 +79,7 @@ export default function LandlordDashboard() {
         return;
       }
 
+      // Redirect tenants to their portal
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
@@ -125,7 +123,7 @@ export default function LandlordDashboard() {
     setError(null);
   };
 
-    const handleSave = async () => {
+  const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
     setError(null);
@@ -184,14 +182,15 @@ export default function LandlordDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Navigation */}
       <header className="bg-white border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-14">
-            <div className="flex items-center gap-8">
+            <div className="flex items-center gap-6">
               <span className="font-bold text-slate-800 tracking-tight">
                 Rental Manager
               </span>
-              <nav className="hidden sm:flex items-center gap-1">
+              <nav className="hidden md:flex items-center gap-1">
                 <Link
                   href="/dashboard"
                   className="px-3 py-2 text-sm font-medium text-green-700 bg-green-50 rounded-lg"
@@ -202,7 +201,7 @@ export default function LandlordDashboard() {
                   href="/pending"
                   className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
                 >
-                  Pending Payments
+                  Pending
                 </Link>
                 <Link
                   href="/record-payment"
@@ -216,6 +215,12 @@ export default function LandlordDashboard() {
                 >
                   Payments
                 </Link>
+                <Link
+                  href="/reminders"
+                  className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
+                >
+                  Reminders
+                </Link>
               </nav>
             </div>
             <button
@@ -228,7 +233,44 @@ export default function LandlordDashboard() {
         </div>
       </header>
 
+      {/* Mobile nav */}
+      <div className="md:hidden bg-white border-b overflow-x-auto">
+        <div className="flex gap-1 px-4 py-2 min-w-max">
+          <Link
+            href="/dashboard"
+            className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg"
+          >
+            Dashboard
+          </Link>
+          <Link
+            href="/pending"
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 rounded-lg"
+          >
+            Pending
+          </Link>
+          <Link
+            href="/record-payment"
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 rounded-lg"
+          >
+            Record
+          </Link>
+          <Link
+            href="/payments"
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 rounded-lg"
+          >
+            Payments
+          </Link>
+          <Link
+            href="/reminders"
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 rounded-lg"
+          >
+            Reminders
+          </Link>
+        </div>
+      </div>
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Expected Rent</p>
@@ -266,6 +308,7 @@ export default function LandlordDashboard() {
           </div>
         )}
 
+        {/* Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
             <h2 className="font-semibold text-slate-800">
@@ -343,6 +386,7 @@ export default function LandlordDashboard() {
         </div>
       </main>
 
+      {/* Edit Modal */}
       {editing && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
