@@ -9,13 +9,6 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
-const THREE_MONTHS_TENANTS = [
-  "Joe Lipanda",
-  "Elias Chisoni",
-  "Emily Mwakisephile",
-  "Gift Mphande",
-];
-
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
     style: "currency",
@@ -31,9 +24,12 @@ function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
 
   const months: string[] = [];
   const d = new Date(nextDueDate + "T12:00:00");
+
+  // Last paid month is the month before next_due_date
   d.setMonth(d.getMonth() - 1);
 
-  const count = Math.max(monthsInAdvance || 1, 1);
+  // Show at least 6 months, or more if they have higher advance
+  const count = Math.max(Number(monthsInAdvance) || 0, 6);
 
   for (let i = 0; i < count; i++) {
     months.unshift(
@@ -198,7 +194,6 @@ export default function LandlordDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Navigation */}
       <header className="bg-white border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-14">
@@ -244,7 +239,6 @@ export default function LandlordDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Expected Rent</p>
@@ -282,7 +276,6 @@ export default function LandlordDashboard() {
           </div>
         )}
 
-        {/* Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
             <h2 className="font-semibold text-slate-800">
@@ -325,10 +318,10 @@ export default function LandlordDashboard() {
                       <td className="px-6 py-3.5">
                         {formatMK(Number(row.monthly_rent))}
                       </td>
-                      <td className="px-6 py-3.5 text-slate-700">
+                      <td className="px-6 py-3.5 text-slate-700 text-xs leading-relaxed max-w-[220px]">
                         {getPaidMonths(
                           row.next_due_date,
-                          Number(row.months_in_advance || 1)
+                          Number(row.months_in_advance || 0)
                         )}
                       </td>
                       <td className="px-6 py-3.5 font-medium text-slate-800">
@@ -360,7 +353,6 @@ export default function LandlordDashboard() {
         </div>
       </main>
 
-      {/* Edit Modal */}
       {editing && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
