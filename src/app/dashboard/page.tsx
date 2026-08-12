@@ -130,12 +130,13 @@ export default function LandlordDashboard() {
     setSuccess(null);
 
     try {
-      const { data, error: rpcError } = await supabase.rpc(
+            const { data, error: rpcError } = await supabase.rpc(
         "landlord_update_tenant",
         {
           p_tenant_id: editing.tenant_id,
           p_full_name: editing.full_name,
           p_phone: editing.phone || null,
+          p_email: editing.email || null,
           p_house_code: editing.house_code,
           p_house_name: editing.house_name,
           p_monthly_rent: Number(editing.monthly_rent),
