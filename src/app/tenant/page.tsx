@@ -26,7 +26,7 @@ function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
   const d = new Date(nextDueDate + "T12:00:00");
   d.setMonth(d.getMonth() - 1);
 
-  const count = Math.max(monthsInAdvance || 1, 1);
+  const count = Math.max(Number(monthsInAdvance) || 0, 6);
 
   for (let i = 0; i < count; i++) {
     months.unshift(
@@ -199,14 +199,14 @@ export default function TenantPortal() {
             </div>
 
             <div className="space-y-3">
-              <div className="flex justify-between items-start">
-                <span className="text-sm text-slate-500">Paid Months</span>
-                <span className="font-medium text-slate-800 text-right max-w-[60%]">
+              <div className="bg-slate-50 rounded-xl p-3">
+                <p className="text-xs text-slate-500 mb-1">Paid Months</p>
+                <p className="text-sm font-medium text-slate-800 leading-relaxed">
                   {getPaidMonths(
                     balance?.next_due_date,
-                    Number(balance?.months_in_advance || 1)
+                    Number(balance?.months_in_advance || 0)
                   )}
-                </span>
+                </p>
               </div>
 
               <div className="flex justify-between items-center">
