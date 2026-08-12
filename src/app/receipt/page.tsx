@@ -18,8 +18,17 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
+function whatsappLink(phone: string, message: string) {
+  let n = (phone || "").replace(/\D/g, "");
+  if (n.startsWith("0")) n = "265" + n.slice(1);
+  if (!n) return null;
+  return `https://wa.me/${n}?text=${encodeURIComponent(message)}`;
+}
+
 export default function ReceiptPage() {
   const [payment, setPayment] = useState<any>(null);
+  const [phone, setPhone] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [id, setId] = useState<string | null>(null);
@@ -27,7 +36,6 @@ export default function ReceiptPage() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
-    // Read ?id= from the URL (works with static export)
     const params = new URLSearchParams(window.location.search);
     const paymentId = params.get("id");
     setId(paymentId);
@@ -51,6 +59,8 @@ export default function ReceiptPage() {
           notes,
           tenants (
             full_name,
+            phone,
+            auth_user_id,
             houses (
               name,
               code
@@ -68,6 +78,13 @@ export default function ReceiptPage() {
       }
 
       setPayment(data);
+      setPhone(data.tenants?.phone || null);
+
+      // Try to get a real email from auth if linked
+      // (only works if you later store a real email on the tenant)
+      // For now we also allow a manual email field if you add one later
+      setEmail(null);
+
       setLoading(false);
     }
 
@@ -99,9 +116,39 @@ export default function ReceiptPage() {
     ? payment.tenants.houses[0]
     : payment.tenants?.houses;
 
+  const receiptUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/receipt?id=${payment.id}`
+      : "";
+
+  const messageBody = `Hello ${tenantName},
+
+Your rent payment has been received and confirmed.
+
+Amount: ${formatMK(Number(payment.amount))}
+Property: ${house?.name || "—"}
+Date: ${payment.paid_date}
+Method: ${payment.method}
+${payment.months_covered ? `Months covered: ${payment.months_covered}` : ""}
+
+View / print your receipt:
+${receiptUrl}
+
+Thank you.
+Tenthanis Rentals`;
+
+  const waLink = phone ? whatsappLink(phone, messageBody) : null;
+
+  const mailtoLink = email
+    ? `mailto:${email}?subject=${encodeURIComponent(
+        `Rent Receipt - ${house?.name || "Property"}`
+      )}&body=${encodeURIComponent(messageBody)}`
+    : null;
+
   return (
     <div className="min-h-screen bg-white p-6">
       <div className="max-w-md mx-auto">
+        {/* Receipt card */}
         <div className="border-2 border-slate-800 p-6 rounded-lg">
           <div className="text-center mb-6">
             <h1 className="text-xl font-bold tracking-wide">RENT RECEIPT</h1>
@@ -151,13 +198,42 @@ export default function ReceiptPage() {
           </p>
         </div>
 
+        {/* Actions */}
         <div className="mt-6 flex flex-col gap-3 print:hidden">
+          {waLink && (
+            <a
+              href={waLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-medium text-center"
+            >
+              Send via WhatsApp
+            </a>
+          )}
+
+          {mailtoLink && (
+            <a
+              href={mailtoLink}
+              className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-xl font-medium text-center"
+            >
+              Send via Email
+            </a>
+          )}
+
+          {!waLink && !mailtoLink && (
+            <p className="text-sm text-center text-slate-500 bg-slate-50 p-3 rounded-xl">
+              No phone or email on file for this tenant. Add a phone number on
+              the Dashboard to send via WhatsApp.
+            </p>
+          )}
+
           <button
             onClick={() => window.print()}
-            className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-medium"
+            className="w-full border border-slate-200 text-slate-700 py-3 rounded-xl font-medium"
           >
             Print / Save as PDF
           </button>
+
           <Link
             href="/payments"
             className="w-full text-center text-sm text-slate-600 py-2"
