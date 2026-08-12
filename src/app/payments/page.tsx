@@ -159,7 +159,7 @@ export default function PaymentsPage() {
 
                   <div className="flex gap-2">
                     <Link
-                      href={`/receipt/${p.id}`}
+                      href={`/receipt?id=${p.id}`}
                       className="text-sm text-green-700 border border-green-200 px-4 py-2 rounded-xl hover:bg-green-50"
                     >
                       Receipt
