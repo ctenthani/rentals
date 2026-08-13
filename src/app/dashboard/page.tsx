@@ -51,6 +51,18 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+const emptyAdd = {
+  house_code: "",
+  house_name: "",
+  monthly_rent: "",
+  bank_account: "1924966",
+  tenant_name: "",
+  phone: "",
+  email: "",
+  next_due_date: new Date().toISOString().split("T")[0],
+  current_balance: "0",
+};
+
 export default function LandlordDashboard() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +75,12 @@ export default function LandlordDashboard() {
   const [loginPassword, setLoginPassword] = useState("");
   const [creatingLogin, setCreatingLogin] = useState(false);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
+
+  // Add property
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({ ...emptyAdd });
+  const [adding, setAdding] = useState(false);
+
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -185,6 +203,8 @@ export default function LandlordDashboard() {
     }
     setCreatingLogin(true);
     setLoginMessage(null);
+
+    // Keep landlord session — only use Edge Function
     const { data, error } = await supabase.functions.invoke(
       "create-tenant-user",
       {
@@ -196,8 +216,13 @@ export default function LandlordDashboard() {
         },
       }
     );
+
     if (error) {
-      setLoginMessage("Error: " + error.message);
+      setLoginMessage(
+        "Error: " +
+          error.message +
+          " (Deploy the create-tenant-user Edge Function first)"
+      );
       setCreatingLogin(false);
       return;
     }
@@ -206,13 +231,53 @@ export default function LandlordDashboard() {
       setCreatingLogin(false);
       return;
     }
-    setLoginMessage(`Login created. Tenant can sign in with ${loginEmail}`);
+
+    setLoginMessage(`Login created. Tenant signs in with ${loginEmail}`);
     setEditing({
       ...editing,
       email: loginEmail,
       auth_user_id: data?.user_id || editing.auth_user_id,
     });
     setCreatingLogin(false);
+    await loadData();
+  };
+
+  const handleAddProperty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdding(true);
+    setError(null);
+    setSuccess(null);
+
+    const { data, error: rpcError } = await supabase.rpc(
+      "landlord_add_property",
+      {
+        p_house_code: addForm.house_code,
+        p_house_name: addForm.house_name,
+        p_monthly_rent: Number(addForm.monthly_rent),
+        p_bank_account: addForm.bank_account,
+        p_tenant_name: addForm.tenant_name,
+        p_phone: addForm.phone || null,
+        p_email: addForm.email || null,
+        p_next_due_date: addForm.next_due_date,
+        p_current_balance: Number(addForm.current_balance || 0),
+      }
+    );
+
+    if (rpcError) {
+      setError(rpcError.message);
+      setAdding(false);
+      return;
+    }
+    if (data && data.success === false) {
+      setError(data.error || "Failed to add property");
+      setAdding(false);
+      return;
+    }
+
+    setSuccess("Property added successfully");
+    setShowAdd(false);
+    setAddForm({ ...emptyAdd });
+    setAdding(false);
     await loadData();
   };
 
@@ -253,7 +318,6 @@ export default function LandlordDashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
-      {/* Header */}
       <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-16">
@@ -284,7 +348,6 @@ export default function LandlordDashboard() {
         </div>
       </header>
 
-      {/* Mobile nav */}
       <div className="md:hidden bg-white border-b border-slate-200 overflow-x-auto">
         <div className="flex gap-1.5 px-4 py-2.5 min-w-max">
           {navLink("/dashboard", "Dashboard", true)}
@@ -296,19 +359,29 @@ export default function LandlordDashboard() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Page title */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            Overview
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage properties, tenants, and rent collection
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Overview
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Manage properties, tenants, and rent collection
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setShowAdd(true);
+              setAddForm({ ...emptyAdd });
+              setError(null);
+            }}
+            className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm transition"
+          >
+            + Add Property
+          </button>
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition">
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Expected Rent
             </p>
@@ -316,7 +389,7 @@ export default function LandlordDashboard() {
               {loading ? "—" : formatMK(totalExpected)}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition">
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Outstanding
             </p>
@@ -324,7 +397,7 @@ export default function LandlordDashboard() {
               {loading ? "—" : formatMK(totalOutstanding)}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition">
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Paid / Overdue
             </p>
@@ -332,20 +405,19 @@ export default function LandlordDashboard() {
               {loading ? "—" : `${paidCount} / ${overdueCount}`}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition">
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Occupancy
+              Properties
             </p>
             <p className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
-              {loading ? "—" : `${rows.length}/10`}
+              {loading ? "—" : rows.length}
             </p>
-            <p className="text-xs text-emerald-600 font-medium mt-1">100%</p>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm flex items-start gap-2">
-            <span className="font-medium">Error:</span> {error}
+          <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
+            {error}
           </div>
         )}
         {success && (
@@ -354,23 +426,22 @@ export default function LandlordDashboard() {
           </div>
         )}
 
-        {/* Table card */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
-            <div>
-              <h2 className="font-semibold text-slate-900">
-                Houses & Tenants
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                3 months advance required: Lipanda, Chisoni, Emily, Gift Mphande
-              </p>
-            </div>
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-900">Houses & Tenants</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              3 months advance: Lipanda, Chisoni, Emily, Gift Mphande
+            </p>
           </div>
 
           {loading ? (
             <div className="p-16 flex flex-col items-center gap-3">
               <div className="w-7 h-7 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-              <p className="text-slate-400 text-sm">Loading tenants...</p>
+              <p className="text-slate-400 text-sm">Loading...</p>
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 text-sm">
+              No properties yet. Click <strong>Add Property</strong> to start.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -392,7 +463,7 @@ export default function LandlordDashboard() {
                       "",
                     ].map((h) => (
                       <th
-                        key={h || "action"}
+                        key={h || "a"}
                         className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap"
                       >
                         {h}
@@ -468,7 +539,179 @@ export default function LandlordDashboard() {
         </div>
       </main>
 
-      {/* Edit Modal */}
+      {/* Add Property Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
+            <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">
+                Add Property
+              </h3>
+              <p className="text-sm text-slate-500 mt-0.5">
+                New house and tenant
+              </p>
+            </div>
+            <form onSubmit={handleAddProperty}>
+              <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      House Code *
+                    </label>
+                    <input
+                      required
+                      value={addForm.house_code}
+                      onChange={(e) =>
+                        setAddForm({ ...addForm, house_code: e.target.value })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                      placeholder="H11"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Monthly Rent *
+                    </label>
+                    <input
+                      required
+                      type="number"
+                      value={addForm.monthly_rent}
+                      onChange={(e) =>
+                        setAddForm({
+                          ...addForm,
+                          monthly_rent: e.target.value,
+                        })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                      placeholder="150000"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      House Name *
+                    </label>
+                    <input
+                      required
+                      value={addForm.house_name}
+                      onChange={(e) =>
+                        setAddForm({ ...addForm, house_name: e.target.value })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                      placeholder="Chileka House 6"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Tenant Name *
+                    </label>
+                    <input
+                      required
+                      value={addForm.tenant_name}
+                      onChange={(e) =>
+                        setAddForm({ ...addForm, tenant_name: e.target.value })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                      placeholder="John Banda"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Phone
+                    </label>
+                    <input
+                      value={addForm.phone}
+                      onChange={(e) =>
+                        setAddForm({ ...addForm, phone: e.target.value })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                      placeholder="26599..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={addForm.email}
+                      onChange={(e) =>
+                        setAddForm({ ...addForm, email: e.target.value })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                      placeholder="optional"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Bank Account
+                    </label>
+                    <input
+                      value={addForm.bank_account}
+                      onChange={(e) =>
+                        setAddForm({
+                          ...addForm,
+                          bank_account: e.target.value,
+                        })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Next Due Date
+                    </label>
+                    <input
+                      type="date"
+                      value={addForm.next_due_date}
+                      onChange={(e) =>
+                        setAddForm({
+                          ...addForm,
+                          next_due_date: e.target.value,
+                        })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                      Starting Balance
+                    </label>
+                    <input
+                      type="number"
+                      value={addForm.current_balance}
+                      onChange={(e) =>
+                        setAddForm({
+                          ...addForm,
+                          current_balance: e.target.value,
+                        })
+                      }
+                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+                <button
+                  type="submit"
+                  disabled={adding}
+                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm"
+                >
+                  {adding ? "Adding..." : "Add Property"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAdd(false)}
+                  className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal — same as before with Create Login */}
       {editing && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
@@ -480,7 +723,6 @@ export default function LandlordDashboard() {
                 {editing.house_code} · {editing.full_name}
               </p>
             </div>
-
             <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
@@ -493,10 +735,9 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, house_name: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div className="col-span-2">
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Tenant Name
@@ -507,10 +748,9 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, full_name: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Phone
@@ -521,10 +761,9 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, phone: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Email
@@ -535,11 +774,9 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, email: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
-                    placeholder="tenant@gmail.com"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Monthly Rent
@@ -550,10 +787,9 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, monthly_rent: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Next Due Date
@@ -564,10 +800,9 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, next_due_date: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Current Balance
@@ -581,10 +816,9 @@ export default function LandlordDashboard() {
                         current_balance: e.target.value,
                       })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Months in Advance
@@ -598,10 +832,9 @@ export default function LandlordDashboard() {
                         months_in_advance: e.target.value,
                       })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Status
@@ -611,14 +844,13 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, status: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   >
                     <option value="upcoming">Upcoming</option>
                     <option value="overdue">Overdue</option>
                     <option value="paid">Paid</option>
                   </select>
                 </div>
-
                 <div className="col-span-2">
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
                     Bank Account
@@ -629,19 +861,17 @@ export default function LandlordDashboard() {
                     onChange={(e) =>
                       setEditing({ ...editing, bank_account: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
                   />
                 </div>
 
-                {/* Create login */}
                 <div className="col-span-2 border-t border-slate-100 pt-5 mt-1">
                   <h4 className="text-sm font-bold text-slate-900 mb-1">
                     Tenant login
                   </h4>
                   <p className="text-xs text-slate-500 mb-3">
-                    {editing.auth_user_id
-                      ? "This tenant already has a login linked."
-                      : "Create an account so this tenant can use the portal."}
+                    Uses the server function so your landlord session stays
+                    active. Deploy create-tenant-user first.
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -653,7 +883,6 @@ export default function LandlordDashboard() {
                         value={loginEmail}
                         onChange={(e) => setLoginEmail(e.target.value)}
                         className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
-                        placeholder="tenant@gmail.com"
                       />
                     </div>
                     <div>
@@ -665,7 +894,6 @@ export default function LandlordDashboard() {
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
                         className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
-                        placeholder="Min 6 characters"
                       />
                     </div>
                   </div>
@@ -684,29 +912,24 @@ export default function LandlordDashboard() {
                     type="button"
                     onClick={handleCreateLogin}
                     disabled={creatingLogin}
-                    className="mt-3 w-full border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50 py-2.5 rounded-xl text-sm font-semibold transition"
+                    className="mt-3 w-full border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50 py-2.5 rounded-xl text-sm font-semibold"
                   >
-                    {creatingLogin
-                      ? "Creating..."
-                      : editing.auth_user_id
-                      ? "Create new login"
-                      : "Create tenant login"}
+                    {creatingLogin ? "Creating..." : "Create tenant login"}
                   </button>
                 </div>
               </div>
             </div>
-
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm shadow-sm transition"
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm"
               >
                 {saving ? "Saving..." : "Save Changes"}
               </button>
               <button
                 onClick={() => setEditing(null)}
-                className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-white transition"
+                className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
               >
                 Cancel
               </button>
