@@ -25,6 +25,7 @@ export default function SignupPage() {
     setLoading(true);
     setError(null);
 
+    // 1. Create auth user
     const { data, error: signError } = await supabase.auth.signUp({
       email,
       password,
@@ -36,7 +37,7 @@ export default function SignupPage() {
       return;
     }
 
-    // Create landlord profile
+    // 2. Create landlord profile (must match auth.uid())
     const { error: profileError } = await supabase.from("landlords").insert({
       auth_user_id: data.user.id,
       full_name: fullName,
@@ -44,7 +45,10 @@ export default function SignupPage() {
     });
 
     if (profileError) {
-      setError(profileError.message);
+      setError(
+        profileError.message +
+          " — Auth account was created. Try signing in, or contact support."
+      );
       setLoading(false);
       return;
     }
@@ -108,7 +112,7 @@ export default function SignupPage() {
           </div>
 
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
+            <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
               {error}
             </p>
           )}
