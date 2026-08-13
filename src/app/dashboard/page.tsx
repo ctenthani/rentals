@@ -79,7 +79,6 @@ export default function LandlordDashboard() {
         return;
       }
 
-      // Redirect tenants to their portal
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
@@ -102,13 +101,33 @@ export default function LandlordDashboard() {
     setLoading(true);
     setError(null);
 
-    const { data, error } = await supabase
+    // Load overview + emails from tenants
+    const { data: overview, error: overviewError } = await supabase
       .from("tenant_overview")
       .select("*")
       .order("house_code");
 
-    if (error) setError(error.message);
-    else setRows(data || []);
+    if (overviewError) {
+      setError(overviewError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: tenantEmails } = await supabase
+      .from("tenants")
+      .select("id, email");
+
+    const emailMap: Record<string, string> = {};
+    (tenantEmails || []).forEach((t: any) => {
+      emailMap[t.id] = t.email || "";
+    });
+
+    const merged = (overview || []).map((row: any) => ({
+      ...row,
+      email: emailMap[row.tenant_id] || "",
+    }));
+
+    setRows(merged);
     setLoading(false);
   }
 
@@ -130,7 +149,7 @@ export default function LandlordDashboard() {
     setSuccess(null);
 
     try {
-            const { data, error: rpcError } = await supabase.rpc(
+      const { data, error: rpcError } = await supabase.rpc(
         "landlord_update_tenant",
         {
           p_tenant_id: editing.tenant_id,
@@ -330,6 +349,7 @@ export default function LandlordDashboard() {
                     <th className="px-6 py-3 font-medium">House</th>
                     <th className="px-6 py-3 font-medium">Tenant</th>
                     <th className="px-6 py-3 font-medium">Phone</th>
+                    <th className="px-6 py-3 font-medium">Email</th>
                     <th className="px-6 py-3 font-medium">Rent</th>
                     <th className="px-6 py-3 font-medium">Paid Months</th>
                     <th className="px-6 py-3 font-medium">Next Due</th>
@@ -349,10 +369,13 @@ export default function LandlordDashboard() {
                       <td className="px-6 py-3.5 text-slate-500">
                         {row.phone || "—"}
                       </td>
+                      <td className="px-6 py-3.5 text-slate-500 text-xs">
+                        {row.email || "—"}
+                      </td>
                       <td className="px-6 py-3.5">
                         {formatMK(Number(row.monthly_rent))}
                       </td>
-                      <td className="px-6 py-3.5 text-slate-700 text-xs leading-relaxed max-w-[220px]">
+                      <td className="px-6 py-3.5 text-slate-700 text-xs leading-relaxed max-w-[200px]">
                         {getPaidMonths(
                           row.next_due_date,
                           Number(row.months_in_advance || 0)
@@ -415,20 +438,7 @@ export default function LandlordDashboard() {
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={editing.email || ""}
-                    onChange={(e) =>
-                      setEditing({ ...editing, email: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                    placeholder="tenant@gmail.com"
-                  />
-                </div>
+
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Tenant Name
@@ -454,6 +464,21 @@ export default function LandlordDashboard() {
                       setEditing({ ...editing, phone: e.target.value })
                     }
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={editing.email || ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, email: e.target.value })
+                    }
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                    placeholder="tenant@gmail.com"
                   />
                 </div>
 
