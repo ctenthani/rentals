@@ -25,20 +25,10 @@ function whatsappLink(phone: string, message: string) {
   return `https://wa.me/${n}?text=${encodeURIComponent(message)}`;
 }
 
-function getTenant(data: any) {
-  if (!data?.tenants) return null;
-  return Array.isArray(data.tenants) ? data.tenants[0] : data.tenants;
-}
-
-function getHouse(tenant: any) {
-  if (!tenant?.houses) return null;
-  return Array.isArray(tenant.houses) ? tenant.houses[0] : tenant.houses;
-}
-
 export default function ReceiptPage() {
   const [payment, setPayment] = useState<any>(null);
-  const [phone, setPhone] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
+  const [tenant, setTenant] = useState<any>(null);
+  const [house, setHouse] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [id, setId] = useState<string | null>(null);
@@ -57,41 +47,40 @@ export default function ReceiptPage() {
         return;
       }
 
-      const { data, error } = await supabase
+      // 1. Payment only
+      const { data: pay, error: payError } = await supabase
         .from("payments")
-        .select(
-          `
-          id,
-          amount,
-          method,
-          paid_date,
-          months_covered,
-          notes,
-          tenants (
-            full_name,
-            phone,
-            email,
-            houses (
-              name,
-              code
-            )
-          )
-        `
-        )
+        .select("id, amount, method, paid_date, months_covered, notes, tenant_id")
         .eq("id", paymentId)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
-        setError(error?.message || "Receipt not found");
+      if (payError || !pay) {
+        setError(payError?.message || "Receipt not found");
         setLoading(false);
         return;
       }
 
-      const tenant = getTenant(data);
+      setPayment(pay);
 
-      setPayment(data);
-      setPhone(tenant?.phone || null);
-      setEmail(tenant?.email || null);
+      // 2. Tenant
+      const { data: ten } = await supabase
+        .from("tenants")
+        .select("id, full_name, phone, email, house_id")
+        .eq("id", pay.tenant_id)
+        .maybeSingle();
+
+      setTenant(ten || null);
+
+      // 3. House
+      if (ten?.house_id) {
+        const { data: h } = await supabase
+          .from("houses")
+          .select("name, code")
+          .eq("id", ten.house_id)
+          .maybeSingle();
+        setHouse(h || null);
+      }
+
       setLoading(false);
     }
 
@@ -118,9 +107,9 @@ export default function ReceiptPage() {
     );
   }
 
-  const tenant = getTenant(payment);
-  const house = getHouse(tenant);
   const tenantName = tenant?.full_name || "Tenant";
+  const phone = tenant?.phone || null;
+  const email = tenant?.email || null;
 
   const receiptUrl =
     typeof window !== "undefined"
@@ -144,7 +133,6 @@ Thank you.
 Tenthanis Rentals`;
 
   const waLink = phone ? whatsappLink(phone, messageBody) : null;
-
   const mailtoLink = email
     ? `mailto:${email}?subject=${encodeURIComponent(
         `Rent Receipt - ${house?.name || "Property"}`
@@ -226,8 +214,8 @@ Tenthanis Rentals`;
 
           {!waLink && !mailtoLink && (
             <p className="text-sm text-center text-slate-500 bg-slate-50 p-3 rounded-xl">
-              No phone or email on file for this tenant. Add them on the
-              Dashboard to send the receipt.
+              No phone or email on file. Add them on the Dashboard to send this
+              receipt.
             </p>
           )}
 
