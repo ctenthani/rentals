@@ -64,8 +64,14 @@ export default function LandlordDashboard() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
-  const router = useRouter();
 
+  // Tenant login creation
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [creatingLogin, setCreatingLogin] = useState(false);
+  const [loginMessage, setLoginMessage] = useState<string | null>(null);
+
+  const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
@@ -101,7 +107,6 @@ export default function LandlordDashboard() {
     setLoading(true);
     setError(null);
 
-    // Load overview + emails from tenants
     const { data: overview, error: overviewError } = await supabase
       .from("tenant_overview")
       .select("*")
@@ -113,18 +118,23 @@ export default function LandlordDashboard() {
       return;
     }
 
-    const { data: tenantEmails } = await supabase
+    const { data: tenantExtras } = await supabase
       .from("tenants")
-      .select("id, email");
+      .select("id, email, auth_user_id");
 
-    const emailMap: Record<string, string> = {};
-    (tenantEmails || []).forEach((t: any) => {
-      emailMap[t.id] = t.email || "";
+    const extraMap: Record<string, { email: string; auth_user_id: string }> =
+      {};
+    (tenantExtras || []).forEach((t: any) => {
+      extraMap[t.id] = {
+        email: t.email || "",
+        auth_user_id: t.auth_user_id || "",
+      };
     });
 
     const merged = (overview || []).map((row: any) => ({
       ...row,
-      email: emailMap[row.tenant_id] || "",
+      email: extraMap[row.tenant_id]?.email || "",
+      auth_user_id: extraMap[row.tenant_id]?.auth_user_id || "",
     }));
 
     setRows(merged);
@@ -140,6 +150,9 @@ export default function LandlordDashboard() {
     setEditing({ ...row });
     setSuccess(null);
     setError(null);
+    setLoginEmail(row.email || "");
+    setLoginPassword("");
+    setLoginMessage(null);
   };
 
   const handleSave = async () => {
@@ -168,7 +181,6 @@ export default function LandlordDashboard() {
       );
 
       if (rpcError) throw rpcError;
-
       if (data && data.success === false) {
         throw new Error(data.error || "Update failed");
       }
@@ -181,6 +193,54 @@ export default function LandlordDashboard() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCreateLogin = async () => {
+    if (!editing) return;
+    if (!loginEmail || !loginPassword) {
+      setLoginMessage("Email and password are required");
+      return;
+    }
+    if (loginPassword.length < 6) {
+      setLoginMessage("Password must be at least 6 characters");
+      return;
+    }
+
+    setCreatingLogin(true);
+    setLoginMessage(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "create-tenant-user",
+      {
+        body: {
+          tenant_id: editing.tenant_id,
+          email: loginEmail,
+          password: loginPassword,
+          full_name: editing.full_name,
+        },
+      }
+    );
+
+    if (error) {
+      setLoginMessage("Error: " + error.message);
+      setCreatingLogin(false);
+      return;
+    }
+
+    if (data?.error) {
+      setLoginMessage("Error: " + data.error);
+      setCreatingLogin(false);
+      return;
+    }
+
+    setLoginMessage(`Login created. Tenant can sign in with ${loginEmail}`);
+    setEditing({
+      ...editing,
+      email: loginEmail,
+      auth_user_id: data?.user_id || editing.auth_user_id,
+    });
+    setCreatingLogin(false);
+    await loadData();
   };
 
   if (checkingAuth) {
@@ -202,7 +262,6 @@ export default function LandlordDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Navigation */}
       <header className="bg-white border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-14">
@@ -253,7 +312,6 @@ export default function LandlordDashboard() {
         </div>
       </header>
 
-      {/* Mobile nav */}
       <div className="md:hidden bg-white border-b overflow-x-auto">
         <div className="flex gap-1 px-4 py-2 min-w-max">
           <Link
@@ -290,7 +348,6 @@ export default function LandlordDashboard() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm text-slate-500">Expected Rent</p>
@@ -328,7 +385,6 @@ export default function LandlordDashboard() {
           </div>
         )}
 
-        {/* Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
             <h2 className="font-semibold text-slate-800">
@@ -350,6 +406,7 @@ export default function LandlordDashboard() {
                     <th className="px-6 py-3 font-medium">Tenant</th>
                     <th className="px-6 py-3 font-medium">Phone</th>
                     <th className="px-6 py-3 font-medium">Email</th>
+                    <th className="px-6 py-3 font-medium">Login</th>
                     <th className="px-6 py-3 font-medium">Rent</th>
                     <th className="px-6 py-3 font-medium">Paid Months</th>
                     <th className="px-6 py-3 font-medium">Next Due</th>
@@ -373,9 +430,18 @@ export default function LandlordDashboard() {
                         {row.email || "—"}
                       </td>
                       <td className="px-6 py-3.5">
+                        {row.auth_user_id ? (
+                          <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            Linked
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">None</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-3.5">
                         {formatMK(Number(row.monthly_rent))}
                       </td>
-                      <td className="px-6 py-3.5 text-slate-700 text-xs leading-relaxed max-w-[200px]">
+                      <td className="px-6 py-3.5 text-slate-700 text-xs leading-relaxed max-w-[180px]">
                         {getPaidMonths(
                           row.next_due_date,
                           Number(row.months_in_advance || 0)
@@ -410,7 +476,6 @@ export default function LandlordDashboard() {
         </div>
       </main>
 
-      {/* Edit Modal */}
       {editing && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
@@ -573,6 +638,70 @@ export default function LandlordDashboard() {
                     }
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
                   />
+                </div>
+
+                {/* Create tenant login */}
+                <div className="col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <h4 className="text-sm font-semibold text-slate-800 mb-1">
+                    Tenant login
+                  </h4>
+                  <p className="text-xs text-slate-500 mb-3">
+                    {editing.auth_user_id
+                      ? "This tenant already has a login linked."
+                      : "Create an account so this tenant can sign in to the portal."}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Login email
+                      </label>
+                      <input
+                        type="email"
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                        placeholder="tenant@gmail.com"
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Temporary password
+                      </label>
+                      <input
+                        type="text"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                        placeholder="Min 6 characters"
+                      />
+                    </div>
+                  </div>
+
+                  {loginMessage && (
+                    <p
+                      className={`text-xs mt-2 ${
+                        loginMessage.startsWith("Error")
+                          ? "text-red-600"
+                          : "text-emerald-600"
+                      }`}
+                    >
+                      {loginMessage}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleCreateLogin}
+                    disabled={creatingLogin}
+                    className="mt-3 w-full border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50 py-2 rounded-xl text-sm font-medium"
+                  >
+                    {creatingLogin
+                      ? "Creating..."
+                      : editing.auth_user_id
+                      ? "Create new login (replaces link)"
+                      : "Create tenant login"}
+                  </button>
                 </div>
               </div>
             </div>
