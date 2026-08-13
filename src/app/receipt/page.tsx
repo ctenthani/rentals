@@ -25,6 +25,16 @@ function whatsappLink(phone: string, message: string) {
   return `https://wa.me/${n}?text=${encodeURIComponent(message)}`;
 }
 
+function getTenant(data: any) {
+  if (!data?.tenants) return null;
+  return Array.isArray(data.tenants) ? data.tenants[0] : data.tenants;
+}
+
+function getHouse(tenant: any) {
+  if (!tenant?.houses) return null;
+  return Array.isArray(tenant.houses) ? tenant.houses[0] : tenant.houses;
+}
+
 export default function ReceiptPage() {
   const [payment, setPayment] = useState<any>(null);
   const [phone, setPhone] = useState<string | null>(null);
@@ -60,7 +70,7 @@ export default function ReceiptPage() {
           tenants (
             full_name,
             phone,
-            auth_user_id,
+            email,
             houses (
               name,
               code
@@ -77,14 +87,11 @@ export default function ReceiptPage() {
         return;
       }
 
+      const tenant = getTenant(data);
+
       setPayment(data);
-      setPhone(data.tenants?.phone || null);
-
-      // Try to get a real email from auth if linked
-      // (only works if you later store a real email on the tenant)
-      // For now we also allow a manual email field if you add one later
-      setEmail(null);
-
+      setPhone(tenant?.phone || null);
+      setEmail(tenant?.email || null);
       setLoading(false);
     }
 
@@ -111,10 +118,9 @@ export default function ReceiptPage() {
     );
   }
 
-  const tenantName = payment.tenants?.full_name || "Tenant";
-  const house = Array.isArray(payment.tenants?.houses)
-    ? payment.tenants.houses[0]
-    : payment.tenants?.houses;
+  const tenant = getTenant(payment);
+  const house = getHouse(tenant);
+  const tenantName = tenant?.full_name || "Tenant";
 
   const receiptUrl =
     typeof window !== "undefined"
@@ -148,7 +154,6 @@ Tenthanis Rentals`;
   return (
     <div className="min-h-screen bg-white p-6">
       <div className="max-w-md mx-auto">
-        {/* Receipt card */}
         <div className="border-2 border-slate-800 p-6 rounded-lg">
           <div className="text-center mb-6">
             <h1 className="text-xl font-bold tracking-wide">RENT RECEIPT</h1>
@@ -198,7 +203,6 @@ Tenthanis Rentals`;
           </p>
         </div>
 
-        {/* Actions */}
         <div className="mt-6 flex flex-col gap-3 print:hidden">
           {waLink && (
             <a
@@ -222,8 +226,8 @@ Tenthanis Rentals`;
 
           {!waLink && !mailtoLink && (
             <p className="text-sm text-center text-slate-500 bg-slate-50 p-3 rounded-xl">
-              No phone or email on file for this tenant. Add a phone number on
-              the Dashboard to send via WhatsApp.
+              No phone or email on file for this tenant. Add them on the
+              Dashboard to send the receipt.
             </p>
           )}
 
