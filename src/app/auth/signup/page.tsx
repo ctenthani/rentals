@@ -16,6 +16,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const router = useRouter();
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -24,31 +25,48 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setInfo(null);
 
-    // 1. Create auth user
     const { data, error: signError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: "https://tenthanis.netlify.app/auth/login",
+      },
     });
 
-    if (signError || !data.user) {
-      setError(signError?.message || "Signup failed");
+    if (signError) {
+      setError(signError.message);
       setLoading(false);
       return;
     }
 
-    // 2. Create landlord profile (must match auth.uid())
-    const { error: profileError } = await supabase.from("landlords").insert({
-      auth_user_id: data.user.id,
-      full_name: fullName,
-      business_name: businessName || fullName,
-    });
+    // If email confirmation is required, there may be no session yet
+    if (!data.session) {
+      setInfo(
+        "Account created. Check your email to confirm, then sign in. Your landlord profile will be created on first sign-in if needed."
+      );
+      setLoading(false);
+      return;
+    }
+
+    // Session exists — create landlord profile via secure function
+    const { data: profileData, error: profileError } = await supabase.rpc(
+      "create_landlord_profile",
+      {
+        p_full_name: fullName,
+        p_business_name: businessName || fullName,
+      }
+    );
 
     if (profileError) {
-      setError(
-        profileError.message +
-          " — Auth account was created. Try signing in, or contact support."
-      );
+      setError(profileError.message);
+      setLoading(false);
+      return;
+    }
+
+    if (profileData && profileData.success === false) {
+      setError(profileData.error || "Could not create landlord profile");
       setLoading(false);
       return;
     }
@@ -114,6 +132,12 @@ export default function SignupPage() {
           {error && (
             <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
               {error}
+            </p>
+          )}
+
+          {info && (
+            <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">
+              {info}
             </p>
           )}
 
