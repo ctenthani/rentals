@@ -1082,6 +1082,13 @@ const handleDelete = async () => {
                 className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
               >
                 Cancel
+                <button
+  type="button"
+  onClick={handleDelete}
+  className="px-5 py-2.5 border border-red-200 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50"
+>
+  Delete property
+</button>
               </button>
             </div>
           </div>
