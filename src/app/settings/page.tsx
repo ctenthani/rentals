@@ -100,7 +100,25 @@ export default function SettingsPage() {
 
     init();
   }, [router]);
-
+{/* Plan */}
+<div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+  <h2 className="font-semibold text-slate-900 mb-2">Subscription</h2>
+  <p className="text-sm text-slate-700">
+    Plan:{" "}
+    <span className="font-semibold capitalize">{plan || "free"}</span>
+  </p>
+  <p className="text-xs text-slate-500 mt-1">
+    {plan === "pro"
+      ? "Pro — unlimited properties"
+      : "Free — 1 tenant included. Upgrade to add more."}
+  </p>
+  {plan !== "pro" && (
+    <p className="text-xs text-slate-500 mt-3">
+      To upgrade, contact support or pay for Pro. Your account will be
+      switched to Pro after payment.
+    </p>
+  )}
+</div>
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isOwner) return;
