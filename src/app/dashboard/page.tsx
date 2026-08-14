@@ -79,7 +79,6 @@ export default function LandlordDashboard() {
   const [addForm, setAddForm] = useState({ ...emptyAdd });
   const [adding, setAdding] = useState(false);
 
-  // Signed-in account
   const [accountEmail, setAccountEmail] = useState("");
   const [landlordName, setLandlordName] = useState("");
   const [businessName, setBusinessName] = useState("");
@@ -101,7 +100,6 @@ export default function LandlordDashboard() {
 
       setAccountEmail(session.user.email || "");
 
-      // Tenant? → portal
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
@@ -113,12 +111,28 @@ export default function LandlordDashboard() {
         return;
       }
 
-      // Load or create landlord profile
+      // Owner landlord
       let { data: landlord } = await supabase
         .from("landlords")
         .select("id, full_name, business_name")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
+
+      // Co-manager
+      if (!landlord) {
+        const { data: membership } = await supabase
+          .from("landlord_members")
+          .select("landlord_id, landlords(id, full_name, business_name)")
+          .eq("auth_user_id", session.user.id)
+          .maybeSingle();
+
+        if (membership?.landlords) {
+          const L = Array.isArray(membership.landlords)
+            ? membership.landlords[0]
+            : membership.landlords;
+          landlord = L as any;
+        }
+      }
 
       if (!landlord) {
         await supabase.rpc("create_landlord_profile", {
@@ -134,9 +148,7 @@ export default function LandlordDashboard() {
       }
 
       if (!landlord) {
-        setError(
-          "No landlord profile found. Contact support or try signing up again."
-        );
+        setError("No landlord profile found.");
         setCheckingAuth(false);
         setLoading(false);
         return;
@@ -162,7 +174,6 @@ export default function LandlordDashboard() {
     setLoading(true);
     setError(null);
 
-    // Only this landlord's tenants
     const { data: tenants, error: tenantsError } = await supabase
       .from("tenants")
       .select(
@@ -193,7 +204,6 @@ export default function LandlordDashboard() {
     }
 
     const tenantIds = (tenants || []).map((t: any) => t.id);
-
     let balances: any[] = [];
     if (tenantIds.length > 0) {
       const { data: balData } = await supabase
@@ -230,7 +240,6 @@ export default function LandlordDashboard() {
       };
     });
 
-    // Sort by house code
     merged.sort((a: any, b: any) =>
       String(a.house_code).localeCompare(String(b.house_code))
     );
@@ -252,34 +261,7 @@ export default function LandlordDashboard() {
     setLoginPassword("");
     setLoginMessage(null);
   };
-const handleDelete = async () => {
-  if (!editing) return;
-  if (
-    !confirm(
-      `Delete ${editing.house_name} / ${editing.full_name}? This cannot be undone.`
-    )
-  )
-    return;
 
-  setSaving(true);
-  const { data, error } = await supabase.rpc("landlord_delete_property", {
-    p_tenant_id: editing.tenant_id,
-  });
-  setSaving(false);
-
-  if (error) {
-    setError(error.message);
-    return;
-  }
-  if (data?.success === false) {
-    setError(data.error || "Delete failed");
-    return;
-  }
-
-  setEditing(null);
-  setSuccess("Property removed");
-  await loadData();
-};
   const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
@@ -317,6 +299,40 @@ const handleDelete = async () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!editing) return;
+    if (
+      !confirm(
+        `Delete ${editing.house_name} / ${editing.full_name}? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    const { data, error: delError } = await supabase.rpc(
+      "landlord_delete_property",
+      { p_tenant_id: editing.tenant_id }
+    );
+
+    setSaving(false);
+
+    if (delError) {
+      setError(delError.message);
+      return;
+    }
+    if (data && data.success === false) {
+      setError(data.error || "Delete failed");
+      return;
+    }
+
+    setEditing(null);
+    setSuccess("Property removed");
+    await loadData();
+  };
+
   const handleCreateLogin = async () => {
     if (!editing) return;
     if (!loginEmail || !loginPassword) {
@@ -346,7 +362,7 @@ const handleDelete = async () => {
       setLoginMessage(
         "Error: " +
           error.message +
-          " — Use manual link in Supabase Auth if Edge Function is not deployed."
+          " — Link manually in Supabase Auth if Edge Function is not deployed."
       );
       setCreatingLogin(false);
       return;
@@ -470,7 +486,6 @@ const handleDelete = async () => {
               </nav>
             </div>
 
-            {/* Signed-in account */}
             <div className="flex items-center gap-3">
               <div className="text-right hidden sm:block">
                 <p className="text-xs text-slate-500">Signed in as</p>
@@ -492,9 +507,10 @@ const handleDelete = async () => {
         </div>
       </header>
 
-      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between">
+      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-2">
         <p className="text-xs text-slate-500 truncate">
-          Signed in: <span className="font-medium text-slate-700">{accountEmail}</span>
+          Signed in:{" "}
+          <span className="font-medium text-slate-700">{accountEmail}</span>
         </p>
       </div>
 
@@ -505,6 +521,7 @@ const handleDelete = async () => {
           {navLink("/record-payment", "Record")}
           {navLink("/payments", "Payments")}
           {navLink("/reminders", "Reminders")}
+          {navLink("/settings", "Settings")}
         </div>
       </div>
 
@@ -1020,8 +1037,8 @@ const handleDelete = async () => {
                     Tenant login
                   </h4>
                   <p className="text-xs text-slate-500 mb-3">
-                    Create a portal login for this tenant (requires Edge
-                    Function), or link manually in Supabase Auth.
+                    Create a portal login for this tenant (Edge Function) or
+                    link manually in Supabase Auth.
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -1069,26 +1086,27 @@ const handleDelete = async () => {
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-3">
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm"
+                className="flex-1 min-w-[120px] bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm"
               >
                 {saving ? "Saving..." : "Save Changes"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={saving}
+                className="px-5 py-2.5 border border-red-200 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50"
+              >
+                Delete
               </button>
               <button
                 onClick={() => setEditing(null)}
                 className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
               >
                 Cancel
-                <button
-  type="button"
-  onClick={handleDelete}
-  className="px-5 py-2.5 border border-red-200 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50"
->
-  Delete property
-</button>
               </button>
             </div>
           </div>
