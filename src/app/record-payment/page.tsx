@@ -19,22 +19,21 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
-function addMonths(dateStr: string, months: number): string {
-  const d = new Date(dateStr + "T12:00:00");
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().split("T")[0];
-}
-
 export default function RecordPaymentPage() {
   const [tenants, setTenants] = useState<any[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [tenantId, setTenantId] = useState("");
   const [amount, setAmount] = useState("");
+  const [paidForMonth, setPaidForMonth] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
+  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const [landlordId, setLandlordId] = useState<string | null>(null);
 
+  const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
@@ -59,42 +58,89 @@ export default function RecordPaymentPage() {
         return;
       }
 
-      await loadTenants();
+      let { data: landlord } = await supabase
+        .from("landlords")
+        .select("id")
+        .eq("auth_user_id", session.user.id)
+        .maybeSingle();
+
+      if (!landlord) {
+        const { data: membership } = await supabase
+          .from("landlord_members")
+          .select("landlord_id")
+          .eq("auth_user_id", session.user.id)
+          .maybeSingle();
+
+        if (membership?.landlord_id) {
+          landlord = { id: membership.landlord_id };
+        }
+      }
+
+      if (!landlord) {
+        setError("No landlord profile found");
+        setLoading(false);
+        return;
+      }
+
+      setLandlordId(landlord.id);
+
+      const { data, error: loadError } = await supabase
+        .from("tenants")
+        .select(
+          `
+          id,
+          full_name,
+          houses (
+            name,
+            code,
+            monthly_rent
+          )
+        `
+        )
+        .eq("landlord_id", landlord.id)
+        .order("full_name");
+
+      if (loadError) {
+        setError(loadError.message);
+      } else {
+        setTenants(data || []);
+      }
+
       setLoading(false);
     }
 
     init();
   }, [router]);
 
-  async function loadTenants() {
-    const { data } = await supabase
-      .from("tenant_overview")
-      .select("*")
-      .order("house_code");
-    setTenants(data || []);
-  }
-
-  const selected = tenants.find((t) => t.tenant_id === selectedId);
-
+  const selected = tenants.find((t) => t.id === tenantId);
+  const house = selected
+    ? Array.isArray(selected.houses)
+      ? selected.houses[0]
+      : selected.houses
+    : null;
+  const monthlyRent = Number(house?.monthly_rent || 0);
+  const amountNum = Number(amount || 0);
   const monthsCovered =
-    selected && Number(amount) > 0 && Number(selected.monthly_rent) > 0
-      ? Math.round(Number(amount) / Number(selected.monthly_rent))
-      : 0;
+    monthlyRent > 0 ? Math.max(1, Math.round(amountNum / monthlyRent)) : 1;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selected || monthsCovered < 1) return;
+    if (!tenantId || !amount) {
+      setError("Select a tenant and enter an amount");
+      return;
+    }
 
     setSaving(true);
-    setMessage(null);
     setError(null);
+    setMessage(null);
 
     const { data, error: rpcError } = await supabase.rpc(
       "record_landlord_payment",
       {
-        p_tenant_id: selected.tenant_id,
-        p_amount: Number(amount),
+        p_tenant_id: tenantId,
+        p_amount: amountNum,
         p_months: monthsCovered,
+        p_paid_for_month: paidForMonth + "-01",
       }
     );
 
@@ -105,18 +151,16 @@ export default function RecordPaymentPage() {
     }
 
     if (data && data.success === false) {
-      setError(data.error || "Failed to record payment");
+      setError(data.error || "Payment failed");
       setSaving(false);
       return;
     }
 
     setMessage(
-      `Payment of ${formatMK(Number(amount))} recorded (${monthsCovered} month${monthsCovered > 1 ? "s" : ""}). Paid up to ${data.new_due_date}. New balance: ${formatMK(data.new_balance)}`
+      `Recorded ${formatMK(amountNum)} for ${monthsCovered} month(s) starting ${paidForMonth}. Next due: ${data?.new_due_date || "—"}`
     );
-
     setAmount("");
-    setSelectedId("");
-    await loadTenants();
+    setNotes("");
     setSaving(false);
   };
 
@@ -140,134 +184,109 @@ export default function RecordPaymentPage() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-8">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <form onSubmit={handleSubmit} className="space-y-5">
+        {tenants.length === 0 ? (
+          <div className="bg-white rounded-2xl border p-8 text-center text-slate-500 text-sm">
+            No properties on this account yet. Add a property from the
+            Dashboard first.
+          </div>
+        ) : (
+          <form
+            onSubmit={handleSubmit}
+            className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5"
+          >
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                Select Tenant
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Tenant
               </label>
               <select
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
                 required
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
               >
-                <option value="">— Choose tenant —</option>
-                {tenants.map((t) => (
-                  <option key={t.tenant_id} value={t.tenant_id}>
-                    {t.house_name} – {t.full_name} (Balance:{" "}
-                    {formatMK(Number(t.current_balance))})
-                  </option>
-                ))}
+                <option value="">Select tenant...</option>
+                {tenants.map((t) => {
+                  const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+                  return (
+                    <option key={t.id} value={t.id}>
+                      {t.full_name} — {h?.name || "—"} (
+                      {formatMK(Number(h?.monthly_rent || 0))}/mo)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
-            {selected && (
-              <div className="bg-slate-50 rounded-xl p-4 text-sm space-y-1">
-                <p>
-                  <span className="text-slate-500">Current Paid Up To:</span>{" "}
-                  <strong>{selected.next_due_date}</strong>
-                </p>
-                <p>
-                  <span className="text-slate-500">Current Balance:</span>{" "}
-                  <strong>{formatMK(Number(selected.current_balance))}</strong>
-                </p>
-                <p>
-                  <span className="text-slate-500">Monthly Rent:</span>{" "}
-                  {formatMK(Number(selected.monthly_rent))}
-                </p>
-              </div>
-            )}
-
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                Amount Received (MK)
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Amount received (MK)
               </label>
               <input
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 required
-                min="1"
+                min={1}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                placeholder="e.g. 360000"
+                placeholder="180000"
+              />
+              {monthlyRent > 0 && amountNum > 0 && (
+                <p className="text-xs text-slate-500 mt-1">
+                  ≈ {monthsCovered} month(s) at {formatMK(monthlyRent)}/mo
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Payment is for month
+              </label>
+              <input
+                type="month"
+                value={paidForMonth}
+                onChange={(e) => setPaidForMonth(e.target.value)}
+                required
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                First month this payment covers. Next due is calculated from
+                here.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Notes (optional)
+              </label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                placeholder="Bank ref, Airtel, etc."
               />
             </div>
 
-            {selected && Number(amount) > 0 && (
-              <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-sm">
-                <p className="font-medium text-green-800">
-                  This amount covers approximately{" "}
-                  <strong>{monthsCovered}</strong> month
-                  {monthsCovered !== 1 ? "s" : ""}
-                </p>
-                <p className="text-green-700 mt-1">
-                  New Paid Up To date will be:{" "}
-                  <strong>
-                    {monthsCovered > 0
-                      ? addMonths(selected.next_due_date, monthsCovered)
-                      : "—"}
-                  </strong>
-                </p>
-              </div>
-            )}
-
-            {message && (
-              <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 text-sm">
-                {message}
-              </div>
-            )}
-
             {error && (
-              <div className="p-3 rounded-xl bg-red-50 text-red-700 text-sm">
+              <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
                 {error}
-              </div>
+              </p>
+            )}
+            {message && (
+              <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">
+                {message}
+              </p>
             )}
 
             <button
               type="submit"
-              disabled={saving || !selectedId || monthsCovered < 1}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium py-3 rounded-xl"
+              disabled={saving}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium py-2.5 rounded-xl"
             >
-              {saving ? "Saving..." : "Record Payment"}
-              const [paidForMonth, setPaidForMonth] = useState(
-  new Date().toISOString().slice(0, 7) // YYYY-MM
-);
-
-// In the form:
-<label className="block text-sm font-medium mb-1">
-  Payment is for month
-</label>
-<input
-  type="month"
-  value={paidForMonth}
-  onChange={(e) => setPaidForMonth(e.target.value)}
-  className="w-full border rounded-xl px-3 py-2.5 text-sm"
-/>
-
-// When calling RPC:
-await supabase.rpc("record_landlord_payment", {
-  p_tenant_id: selectedTenantId,
-  p_amount: Number(amount),
-  p_months: monthsCovered, // from amount / rent
-  p_paid_for_month: paidForMonth + "-01",
-});
- // After you have session and landlordId (same resolve logic as dashboard):
-
-const { data: tenants } = await supabase
-  .from("tenants")
-  .select(
-    `
-    id,
-    full_name,
-    houses ( name, code, monthly_rent )
-  `
-  )
-  .eq("landlord_id", landlordId)
-  .order("full_name");
+              {saving ? "Saving..." : "Record payment"}
             </button>
           </form>
-        </div>
+        )}
       </main>
     </div>
   );
