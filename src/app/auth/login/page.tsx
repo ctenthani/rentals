@@ -83,7 +83,14 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
-
+<div className="text-right">
+  <Link
+    href="/auth/forgot-password"
+    className="text-xs text-green-700 font-medium"
+  >
+    Forgot password?
+  </Link>
+</div>
         <p className="text-sm text-center text-slate-500 mt-6">
           New landlord?{" "}
           <Link href="/auth/signup" className="text-green-700 font-medium">
