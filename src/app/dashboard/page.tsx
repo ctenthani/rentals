@@ -19,34 +19,34 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
-function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number): string {
-  if (!nextDueDate) return "No payments recorded";
-  const months: string[] = [];
+function getPaidMonths(
+  nextDueDate: string | null,
+  monthsInAdvance: number
+): string {
+  if (!nextDueDate) return "—";
   const d = new Date(nextDueDate + "T12:00:00");
   if (Number.isNaN(d.getTime())) return "—";
-
-  // Last paid month is the month before next due
   d.setMonth(d.getMonth() - 1);
-
   const count = Math.max(Number(monthsInAdvance) || 1, 1);
+  const months: string[] = [];
   for (let i = 0; i < count; i++) {
     months.unshift(
-      d.toLocaleString("en", { month: "short", year: "numeric" })
+      d.toLocaleString("en", { month: "short", year: "2-digit" })
     );
     d.setMonth(d.getMonth() - 1);
   }
-  return months.join(" · ");
+  return months.join(", ");
 }
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    paid: "bg-emerald-100 text-emerald-800",
-    overdue: "bg-red-100 text-red-800",
-    upcoming: "bg-sky-100 text-sky-800",
+    paid: "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200",
+    overdue: "bg-rose-100 text-rose-800 ring-1 ring-rose-200",
+    upcoming: "bg-sky-100 text-sky-800 ring-1 ring-sky-200",
   };
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide ${
+      className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${
         styles[status] || "bg-slate-100 text-slate-600"
       }`}
     >
@@ -69,6 +69,7 @@ const emptyAdd = {
 
 export default function LandlordDashboard() {
   const [rows, setRows] = useState<any[]>([]);
+  const [recentPayments, setRecentPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -82,7 +83,6 @@ export default function LandlordDashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ ...emptyAdd });
   const [adding, setAdding] = useState(false);
-
   const [accountEmail, setAccountEmail] = useState("");
   const [landlordName, setLandlordName] = useState("");
   const [businessName, setBusinessName] = useState("");
@@ -102,12 +102,10 @@ export default function LandlordDashboard() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
       if (!session) {
         router.push("/auth/login");
         return;
       }
-
       setAccountEmail(session.user.email || "");
 
       const { data: tenantCheck } = await supabase
@@ -115,7 +113,6 @@ export default function LandlordDashboard() {
         .select("id")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
-
       if (tenantCheck) {
         router.push("/tenant");
         return;
@@ -133,7 +130,6 @@ export default function LandlordDashboard() {
           .select("landlord_id, landlords(id, full_name, business_name)")
           .eq("auth_user_id", session.user.id)
           .maybeSingle();
-
         if (membership?.landlords) {
           const L = Array.isArray(membership.landlords)
             ? membership.landlords[0]
@@ -168,7 +164,6 @@ export default function LandlordDashboard() {
       setCheckingAuth(false);
       await loadData(landlord.id);
     }
-
     init();
   }, [router]);
 
@@ -178,29 +173,14 @@ export default function LandlordDashboard() {
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError(null);
 
     const { data: tenants, error: tenantsError } = await supabase
       .from("tenants")
       .select(
-        `
-        id,
-        full_name,
-        phone,
-        email,
-        auth_user_id,
-        house_id,
-        houses (
-          id,
-          code,
-          name,
-          monthly_rent,
-          bank_account,
-          landlord_id
-        )
-      `
+        `id, full_name, phone, email, auth_user_id, house_id,
+         houses ( id, code, name, monthly_rent, bank_account )`
       )
       .eq("landlord_id", id)
       .order("full_name");
@@ -213,18 +193,13 @@ export default function LandlordDashboard() {
 
     const tenantIds = (tenants || []).map((t: any) => t.id);
     let balances: any[] = [];
-
     if (tenantIds.length > 0) {
-      const { data: balData, error: balError } = await supabase
+      const { data: balData } = await supabase
         .from("tenant_balances")
         .select(
           "tenant_id, current_balance, next_due_date, months_in_advance, status"
         )
         .in("tenant_id", tenantIds);
-
-      if (balError) {
-        console.error(balError);
-      }
       balances = balData || [];
     }
 
@@ -256,8 +231,23 @@ export default function LandlordDashboard() {
     merged.sort((a: any, b: any) =>
       String(a.house_code).localeCompare(String(b.house_code))
     );
-
     setRows(merged);
+
+    if (tenantIds.length > 0) {
+      const { data: pays } = await supabase
+        .from("payments")
+        .select(
+          `id, amount, paid_date, months_covered, method,
+           tenants ( full_name )`
+        )
+        .in("tenant_id", tenantIds)
+        .order("paid_date", { ascending: false })
+        .limit(8);
+      setRecentPayments(pays || []);
+    } else {
+      setRecentPayments([]);
+    }
+
     setLoading(false);
   }
 
@@ -267,10 +257,7 @@ export default function LandlordDashboard() {
   };
 
   const openEdit = (row: any) => {
-    setEditing({
-      ...row,
-      next_due_date: row.next_due_date || "",
-    });
+    setEditing({ ...row, next_due_date: row.next_due_date || "" });
     setSuccess(null);
     setError(null);
     setLoginEmail(row.email || "");
@@ -302,14 +289,13 @@ export default function LandlordDashboard() {
         }
       );
       if (rpcError) throw rpcError;
-      if (data && data.success === false) {
+      if (data?.success === false)
         throw new Error(data.error || "Update failed");
-      }
-      setSuccess("Changes saved successfully");
+      setSuccess("Changes saved");
       setEditing(null);
       await loadData();
     } catch (err: any) {
-      setError(err.message || "Failed to save changes");
+      setError(err.message || "Failed to save");
     } finally {
       setSaving(false);
     }
@@ -317,33 +303,22 @@ export default function LandlordDashboard() {
 
   const handleDelete = async () => {
     if (!editing) return;
-    if (
-      !confirm(
-        `Delete ${editing.house_name} / ${editing.full_name}? This cannot be undone.`
-      )
-    ) {
+    if (!confirm(`Delete ${editing.house_name} / ${editing.full_name}?`))
       return;
-    }
-
     setSaving(true);
-    setError(null);
-
     const { data, error: delError } = await supabase.rpc(
       "landlord_delete_property",
       { p_tenant_id: editing.tenant_id }
     );
-
     setSaving(false);
-
     if (delError) {
       setError(delError.message);
       return;
     }
-    if (data && data.success === false) {
+    if (data?.success === false) {
       setError(data.error || "Delete failed");
       return;
     }
-
     setEditing(null);
     setSuccess("Property removed");
     await loadData();
@@ -352,16 +327,11 @@ export default function LandlordDashboard() {
   const handleCreateLogin = async () => {
     if (!editing) return;
     if (!loginEmail || !loginPassword) {
-      setLoginMessage("Email and password are required");
-      return;
-    }
-    if (loginPassword.length < 6) {
-      setLoginMessage("Password must be at least 6 characters");
+      setLoginMessage("Email and password required");
       return;
     }
     setCreatingLogin(true);
     setLoginMessage(null);
-
     const { data, error } = await supabase.functions.invoke(
       "create-tenant-user",
       {
@@ -373,7 +343,6 @@ export default function LandlordDashboard() {
         },
       }
     );
-
     if (error) {
       setLoginMessage("Error: " + error.message);
       setCreatingLogin(false);
@@ -384,7 +353,6 @@ export default function LandlordDashboard() {
       setCreatingLogin(false);
       return;
     }
-
     setLoginMessage(`Login created for ${loginEmail}`);
     setEditing({
       ...editing,
@@ -399,8 +367,6 @@ export default function LandlordDashboard() {
     e.preventDefault();
     setAdding(true);
     setError(null);
-    setSuccess(null);
-
     const { data, error: rpcError } = await supabase.rpc(
       "landlord_add_property",
       {
@@ -415,54 +381,47 @@ export default function LandlordDashboard() {
         p_current_balance: Number(addForm.current_balance || 0),
       }
     );
-
+    setAdding(false);
     if (rpcError) {
       setError(rpcError.message);
-      setAdding(false);
       return;
     }
-    if (data && data.success === false) {
-      setError(data.error || "Failed to add property");
-      setAdding(false);
+    if (data?.success === false) {
+      setError(data.error || "Failed");
       return;
     }
-
-    setSuccess("Property added successfully");
+    setSuccess("Property added");
     setShowAdd(false);
     setAddForm({ ...emptyAdd });
-    setAdding(false);
     await loadData();
   };
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-500 text-sm">Loading dashboard...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-sky-50">
+        <div className="w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   const totalExpected = rows.reduce(
-    (sum, r) => sum + Number(r.monthly_rent || 0),
+    (s, r) => s + Number(r.monthly_rent || 0),
     0
   );
   const totalOutstanding = rows.reduce(
-    (sum, r) => sum + Number(r.current_balance || 0),
+    (s, r) => s + Number(r.current_balance || 0),
     0
   );
   const paidCount = rows.filter((r) => r.status === "paid").length;
   const overdueCount = rows.filter((r) => r.status === "overdue").length;
 
-  const navLink = (href: string, label: string, active = false) => (
+  const nav = (href: string, label: string, active = false) => (
     <Link
       href={href}
-      className={`px-3 py-2 text-sm font-medium rounded-lg whitespace-nowrap ${
+      className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition ${
         active
-          ? "text-green-800 bg-green-100"
-          : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+          ? "bg-emerald-600 text-white shadow-sm"
+          : "text-slate-600 hover:bg-emerald-50 hover:text-emerald-800"
       }`}
     >
       {label}
@@ -470,37 +429,36 @@ export default function LandlordDashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-5xl mx-auto px-4">
-          <div className="flex justify-between items-center h-14 gap-3">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/40 to-sky-50 overflow-x-hidden">
+      <header className="bg-white/90 backdrop-blur border-b border-emerald-100 sticky top-0 z-40">
+        <div className="w-full max-w-[100vw] px-3 lg:px-6">
+          <div className="flex items-center justify-between h-14 gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 shrink-0 rounded-lg bg-green-600 flex items-center justify-center">
-                <span className="text-white text-sm font-bold">R</span>
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-200">
+                <span className="text-white font-bold text-sm">R</span>
               </div>
               <div className="min-w-0">
                 <p className="font-bold text-slate-900 text-sm truncate">
                   {businessName || "Rental Manager"}
                 </p>
-                <p className="text-[11px] text-slate-500 truncate hidden sm:block">
+                <p className="text-[10px] text-emerald-700/80 truncate hidden sm:block">
                   {landlordName}
                 </p>
               </div>
             </div>
-
             <div className="flex items-center gap-2 shrink-0">
-              <div className="text-right hidden sm:block">
-                <p className="text-[10px] text-slate-500">Signed in</p>
-                <p className="text-xs font-medium text-slate-800 max-w-[140px] truncate">
+              <div className="hidden md:block text-right">
+                <p className="text-[10px] text-slate-400">Signed in</p>
+                <p className="text-xs font-medium text-slate-700 max-w-[160px] truncate">
                   {accountEmail}
                 </p>
               </div>
-              <div className="w-8 h-8 rounded-full bg-green-100 text-green-800 flex items-center justify-center text-sm font-bold">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white flex items-center justify-center text-xs font-bold shadow">
                 {(accountEmail || "?").charAt(0).toUpperCase()}
               </div>
               <button
                 onClick={handleLogout}
-                className="text-xs text-slate-500 hover:text-slate-800 font-medium px-2 py-1"
+                className="text-xs font-medium text-slate-500 hover:text-rose-600 px-2"
               >
                 Logout
               </button>
@@ -509,64 +467,63 @@ export default function LandlordDashboard() {
         </div>
       </header>
 
-      {/* Nav — wraps, no horizontal page scroll */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 py-2 flex flex-wrap gap-1">
-          {navLink("/dashboard", "Dashboard", true)}
-          {navLink("/pending", "Pending")}
-          {navLink("/record-payment", "Record")}
-          {navLink("/payments", "Payments")}
-          {navLink("/reminders", "Reminders")}
-          {navLink("/settings", "Settings")}
+      <div className="bg-white/70 border-b border-emerald-100">
+        <div className="px-3 lg:px-6 py-2 flex flex-wrap gap-1">
+          {nav("/dashboard", "Dashboard", true)}
+          {nav("/pending", "Pending")}
+          {nav("/record-payment", "Record")}
+          {nav("/payments", "Payments")}
+          {nav("/reminders", "Reminders")}
+          {nav("/settings", "Settings")}
         </div>
       </div>
 
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+      <main className="px-3 lg:px-6 py-5 max-w-[100vw]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Overview</h1>
-            <p className="text-sm text-slate-500">Your properties only</p>
+            <p className="text-xs text-slate-500">
+              Properties, dues, paid months & receipts
+            </p>
           </div>
           <button
             onClick={() => {
               setShowAdd(true);
               setAddForm({ ...emptyAdd });
-              setError(null);
             }}
-            className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl self-start"
+            className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-200 self-start"
           >
             + Add Property
           </button>
         </div>
 
-        {/* Stats — 2x2 on mobile, no overflow */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <p className="text-[11px] font-medium text-slate-500 uppercase">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <div className="rounded-2xl bg-white border border-emerald-100 p-4 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
               Expected
             </p>
-            <p className="text-lg font-bold text-slate-900 mt-1 break-words">
+            <p className="text-lg font-bold text-slate-900 mt-1">
               {loading ? "—" : formatMK(totalExpected)}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <p className="text-[11px] font-medium text-slate-500 uppercase">
+          <div className="rounded-2xl bg-white border border-rose-100 p-4 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-500">
               Outstanding
             </p>
-            <p className="text-lg font-bold text-red-600 mt-1 break-words">
+            <p className="text-lg font-bold text-rose-600 mt-1">
               {loading ? "—" : formatMK(totalOutstanding)}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <p className="text-[11px] font-medium text-slate-500 uppercase">
+          <div className="rounded-2xl bg-white border border-sky-100 p-4 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-sky-600">
               Paid / Overdue
             </p>
             <p className="text-lg font-bold text-slate-900 mt-1">
               {loading ? "—" : `${paidCount} / ${overdueCount}`}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <p className="text-[11px] font-medium text-slate-500 uppercase">
+          <div className="rounded-2xl bg-white border border-violet-100 p-4 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-violet-600">
               Properties
             </p>
             <p className="text-lg font-bold text-slate-900 mt-1">
@@ -576,134 +533,206 @@ export default function LandlordDashboard() {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm break-words">
+          <div className="mb-3 p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm">
             {error}
           </div>
         )}
         {success && (
-          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-sm">
+          <div className="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-800 text-sm">
             {success}
           </div>
         )}
 
-        {/* Card list — no horizontal scroll */}
-        <div className="space-y-3">
-          <h2 className="font-semibold text-slate-900 px-1">
-            Houses & Tenants
-          </h2>
+        {/* Recent payments + receipts */}
+        {recentPayments.length > 0 && (
+          <div className="mb-5 bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="font-bold text-slate-800 text-sm">
+                Recent payments
+              </h2>
+              <Link
+                href="/payments"
+                className="text-xs font-semibold text-emerald-700 hover:underline"
+              >
+                View all
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {recentPayments.map((p) => {
+                const t = Array.isArray(p.tenants) ? p.tenants[0] : p.tenants;
+                return (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between gap-2 text-sm border-b border-slate-50 last:border-0 pb-2 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-800 truncate">
+                        {t?.full_name || "Tenant"}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {p.paid_date}
+                        {p.months_covered
+                          ? ` · ${p.months_covered} mo`
+                          : ""}
+                        {p.method ? ` · ${p.method}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-bold text-emerald-700">
+                        {formatMK(Number(p.amount))}
+                      </span>
+                      <Link
+                        href={`/receipt?id=${p.id}`}
+                        className="bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg"
+                      >
+                        Receipt
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-sky-50">
+            <h2 className="font-bold text-slate-800 text-sm">
+              Houses & Tenants
+            </h2>
+          </div>
 
           {loading ? (
-            <div className="bg-white rounded-2xl border p-10 flex justify-center">
-              <div className="w-7 h-7 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+            <div className="p-12 flex justify-center">
+              <div className="w-7 h-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : rows.length === 0 ? (
-            <div className="bg-white rounded-2xl border p-10 text-center text-slate-500 text-sm">
-              No properties yet.{" "}
-              <button
-                onClick={() => setShowAdd(true)}
-                className="text-green-700 font-semibold"
-              >
-                Add your first
-              </button>
+            <div className="p-10 text-center text-slate-500 text-sm">
+              No properties yet.
             </div>
           ) : (
-            rows.map((row) => (
-              <div
-                key={row.tenant_id}
-                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"
+            <div className="w-full overflow-x-auto">
+              <table
+                className="w-full table-fixed text-left"
+                style={{ minWidth: 0 }}
               >
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-slate-900 truncate">
-                      {row.house_name}
-                    </p>
-                    <p className="text-sm text-slate-600 truncate">
-                      {row.full_name}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {row.house_code}
-                      {row.phone ? ` · ${row.phone}` : ""}
-                    </p>
-                  </div>
-                  <StatusBadge status={row.status} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-                  <div>
-                    <p className="text-[11px] text-slate-500 uppercase">Rent</p>
-                    <p className="font-medium text-slate-800">
-                      {formatMK(row.monthly_rent)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-slate-500 uppercase">
-                      Balance
-                    </p>
-                    <p className="font-semibold text-red-600">
-                      {formatMK(row.current_balance)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-slate-500 uppercase">
-                      Next due
-                    </p>
-                    <p className="font-semibold text-slate-900">
-                      {row.next_due_date || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-slate-500 uppercase">
-                      Advance
-                    </p>
-                    <p className="font-medium text-slate-800">
-                      {row.months_in_advance || 0} mo
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 rounded-xl px-3 py-2 mb-3">
-                  <p className="text-[11px] text-slate-500 uppercase mb-0.5">
-                    Paid months
-                  </p>
-                  <p className="text-sm text-slate-800 leading-snug break-words">
-                    {getPaidMonths(row.next_due_date, row.months_in_advance)}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => openEdit(row)}
-                    className="text-sm font-semibold text-green-700 hover:underline"
-                  >
-                    Edit
-                  </button>
-                  <Link
-                    href={`/lease?tenant_id=${row.tenant_id}`}
-                    className="text-sm font-medium text-slate-600 hover:underline"
-                  >
-                    Lease
-                  </Link>
-                  <span className="text-xs text-slate-400 self-center">
-                    Bank {row.bank_account || "—"}
-                  </span>
-                  {row.auth_user_id ? (
-                    <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full ml-auto">
-                      Login linked
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            ))
+                <colgroup>
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[7%]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                    <th className="px-2 py-2.5 font-bold">House</th>
+                    <th className="px-2 py-2.5 font-bold">Tenant</th>
+                    <th className="px-2 py-2.5 font-bold">Rent</th>
+                    <th className="px-2 py-2.5 font-bold">Next due</th>
+                    <th className="px-2 py-2.5 font-bold">Paid months</th>
+                    <th className="px-2 py-2.5 font-bold">Balance</th>
+                    <th className="px-2 py-2.5 font-bold">Status</th>
+                    <th className="px-2 py-2.5 font-bold">Bank</th>
+                    <th className="px-2 py-2.5 font-bold">Login</th>
+                    <th className="px-2 py-2.5 font-bold"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr
+                      key={row.tenant_id}
+                      className={`text-xs border-t border-slate-100 hover:bg-emerald-50/50 transition ${
+                        i % 2 === 0 ? "bg-white" : "bg-slate-50/40"
+                      }`}
+                    >
+                      <td className="px-2 py-2.5 font-semibold text-slate-900 truncate">
+                        <span className="text-emerald-700">
+                          {row.house_code}
+                        </span>
+                        <span className="block text-[10px] font-normal text-slate-500 truncate">
+                          {row.house_name}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5 text-slate-800 truncate">
+                        {row.full_name}
+                        {row.phone && (
+                          <span className="block text-[10px] text-slate-400 truncate">
+                            {row.phone}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 font-medium text-slate-800 whitespace-nowrap">
+                        {formatMK(row.monthly_rent)}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <span className="font-bold text-teal-700 whitespace-nowrap">
+                          {row.next_due_date || "—"}
+                        </span>
+                        <span className="block text-[10px] text-slate-400">
+                          {row.months_in_advance || 0} mo adv
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5 text-[11px] text-slate-700 leading-snug">
+                        <span className="line-clamp-2">
+                          {getPaidMonths(
+                            row.next_due_date,
+                            row.months_in_advance
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5 font-bold text-rose-600 whitespace-nowrap">
+                        {formatMK(row.current_balance)}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <StatusBadge status={row.status} />
+                      </td>
+                      <td className="px-2 py-2.5 text-[10px] text-slate-500 truncate">
+                        {row.bank_account || "—"}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        {row.auth_user_id ? (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">No</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <div className="flex flex-col gap-0.5">
+                          <button
+                            onClick={() => openEdit(row)}
+                            className="text-[11px] font-bold text-emerald-700 hover:underline text-left"
+                          >
+                            Edit
+                          </button>
+                          <Link
+                            href={`/lease?tenant_id=${row.tenant_id}`}
+                            className="text-[11px] font-medium text-sky-700 hover:underline"
+                          >
+                            Lease
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </main>
 
-      {/* Add modal */}
       {showAdd && (
-        <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-          <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[95vh] overflow-y-auto">
-            <div className="px-5 py-4 border-b">
-              <h3 className="text-lg font-bold">Add Property</h3>
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="px-5 py-4 border-b bg-gradient-to-r from-emerald-50 to-teal-50">
+              <h3 className="font-bold text-slate-900">Add Property</h3>
             </div>
             <form onSubmit={handleAddProperty} className="p-5 space-y-3">
               <input
@@ -733,7 +762,7 @@ export default function LandlordDashboard() {
                 }
                 className="w-full border rounded-xl px-3 py-2.5 text-sm"
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <input
                   required
                   type="number"
@@ -762,18 +791,18 @@ export default function LandlordDashboard() {
                 className="w-full border rounded-xl px-3 py-2.5 text-sm"
               />
               <input
-                placeholder="Bank account"
+                placeholder="Bank"
                 value={addForm.bank_account}
                 onChange={(e) =>
                   setAddForm({ ...addForm, bank_account: e.target.value })
                 }
                 className="w-full border rounded-xl px-3 py-2.5 text-sm"
               />
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2">
                 <button
                   type="submit"
                   disabled={adding}
-                  className="flex-1 bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold"
+                  className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold"
                 >
                   {adding ? "Adding..." : "Add"}
                 </button>
@@ -790,67 +819,68 @@ export default function LandlordDashboard() {
         </div>
       )}
 
-      {/* Edit modal */}
       {editing && (
-        <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-          <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[95vh] overflow-y-auto">
-            <div className="px-5 py-4 border-b">
-              <h3 className="text-lg font-bold">Edit Property</h3>
-              <p className="text-sm text-slate-500">
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="px-5 py-4 border-b bg-gradient-to-r from-emerald-50 to-sky-50">
+              <h3 className="font-bold">Edit Property</h3>
+              <p className="text-xs text-slate-500">
                 {editing.house_code} · {editing.full_name}
               </p>
             </div>
             <div className="p-5 space-y-3">
               <input
                 value={editing.house_name || ""}
+                placeholder="House name"
                 onChange={(e) =>
                   setEditing({ ...editing, house_name: e.target.value })
                 }
                 className="w-full border rounded-xl px-3 py-2.5 text-sm"
-                placeholder="House name"
               />
               <input
                 value={editing.full_name || ""}
+                placeholder="Tenant"
                 onChange={(e) =>
                   setEditing({ ...editing, full_name: e.target.value })
                 }
                 className="w-full border rounded-xl px-3 py-2.5 text-sm"
-                placeholder="Tenant name"
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <input
                   value={editing.phone || ""}
+                  placeholder="Phone"
                   onChange={(e) =>
                     setEditing({ ...editing, phone: e.target.value })
                   }
                   className="w-full border rounded-xl px-3 py-2.5 text-sm"
-                  placeholder="Phone"
                 />
                 <input
                   type="email"
                   value={editing.email || ""}
+                  placeholder="Email"
                   onChange={(e) =>
                     setEditing({ ...editing, email: e.target.value })
                   }
                   className="w-full border rounded-xl px-3 py-2.5 text-sm"
-                  placeholder="Email"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[11px] text-slate-500">Rent</label>
+                  <label className="text-[10px] text-slate-500 font-bold">
+                    RENT
+                  </label>
                   <input
                     type="number"
                     value={editing.monthly_rent}
                     onChange={(e) =>
                       setEditing({ ...editing, monthly_rent: e.target.value })
                     }
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] text-slate-500">
-                    Next due date
+                  <label className="text-[10px] text-teal-700 font-bold">
+                    NEXT DUE
                   </label>
                   <input
                     type="date"
@@ -861,13 +891,15 @@ export default function LandlordDashboard() {
                         next_due_date: e.target.value,
                       })
                     }
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                    className="w-full border border-teal-200 rounded-xl px-3 py-2 text-sm"
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[11px] text-slate-500">Balance</label>
+                  <label className="text-[10px] text-slate-500 font-bold">
+                    BALANCE
+                  </label>
                   <input
                     type="number"
                     value={editing.current_balance}
@@ -877,12 +909,12 @@ export default function LandlordDashboard() {
                         current_balance: e.target.value,
                       })
                     }
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] text-slate-500">
-                    Months in advance
+                  <label className="text-[10px] text-slate-500 font-bold">
+                    MONTHS ADVANCE
                   </label>
                   <input
                     type="number"
@@ -893,7 +925,7 @@ export default function LandlordDashboard() {
                         months_in_advance: e.target.value,
                       })
                     }
-                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
                   />
                 </div>
               </div>
@@ -910,27 +942,27 @@ export default function LandlordDashboard() {
               </select>
               <input
                 value={editing.bank_account || ""}
+                placeholder="Bank"
                 onChange={(e) =>
                   setEditing({ ...editing, bank_account: e.target.value })
                 }
                 className="w-full border rounded-xl px-3 py-2.5 text-sm"
-                placeholder="Bank account"
               />
 
               <div className="border-t pt-3 space-y-2">
-                <p className="text-sm font-semibold">Tenant login</p>
+                <p className="text-sm font-bold text-slate-800">Tenant login</p>
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="email"
                     value={loginEmail}
+                    placeholder="Email"
                     onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="Login email"
                     className="w-full border rounded-xl px-3 py-2 text-sm"
                   />
                   <input
                     value={loginPassword}
+                    placeholder="Password"
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="Temp password"
                     className="w-full border rounded-xl px-3 py-2 text-sm"
                   />
                 </div>
@@ -938,7 +970,7 @@ export default function LandlordDashboard() {
                   <p
                     className={`text-xs ${
                       loginMessage.startsWith("Error")
-                        ? "text-red-600"
+                        ? "text-rose-600"
                         : "text-emerald-600"
                     }`}
                   >
@@ -949,24 +981,24 @@ export default function LandlordDashboard() {
                   type="button"
                   onClick={handleCreateLogin}
                   disabled={creatingLogin}
-                  className="w-full border border-green-200 text-green-700 py-2 rounded-xl text-sm font-medium"
+                  className="w-full border border-emerald-200 text-emerald-700 py-2 rounded-xl text-sm font-semibold"
                 >
                   {creatingLogin ? "Creating..." : "Create tenant login"}
                 </button>
               </div>
 
-              <div className="flex flex-wrap gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="flex-1 min-w-[100px] bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold"
+                  className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold"
                 >
                   {saving ? "Saving..." : "Save"}
                 </button>
                 <button
                   type="button"
                   onClick={handleDelete}
-                  className="px-4 border border-red-200 text-red-600 rounded-xl text-sm"
+                  className="px-4 border border-rose-200 text-rose-600 rounded-xl text-sm"
                 >
                   Delete
                 </button>
