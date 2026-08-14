@@ -75,11 +75,15 @@ export default function LandlordDashboard() {
   const [loginPassword, setLoginPassword] = useState("");
   const [creatingLogin, setCreatingLogin] = useState(false);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
-
-  // Add property
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ ...emptyAdd });
   const [adding, setAdding] = useState(false);
+
+  // Signed-in account
+  const [accountEmail, setAccountEmail] = useState("");
+  const [landlordName, setLandlordName] = useState("");
+  const [businessName, setBusinessName] = useState("");
+  const [landlordId, setLandlordId] = useState<string | null>(null);
 
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -89,53 +93,148 @@ export default function LandlordDashboard() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
+
       if (!session) {
         router.push("/auth/login");
         return;
       }
+
+      setAccountEmail(session.user.email || "");
+
+      // Tenant? → portal
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
+
       if (tenantCheck) {
         router.push("/tenant");
         return;
       }
+
+      // Load or create landlord profile
+      let { data: landlord } = await supabase
+        .from("landlords")
+        .select("id, full_name, business_name")
+        .eq("auth_user_id", session.user.id)
+        .maybeSingle();
+
+      if (!landlord) {
+        await supabase.rpc("create_landlord_profile", {
+          p_full_name: session.user.email?.split("@")[0] || "Landlord",
+          p_business_name: null,
+        });
+        const res = await supabase
+          .from("landlords")
+          .select("id, full_name, business_name")
+          .eq("auth_user_id", session.user.id)
+          .maybeSingle();
+        landlord = res.data;
+      }
+
+      if (!landlord) {
+        setError(
+          "No landlord profile found. Contact support or try signing up again."
+        );
+        setCheckingAuth(false);
+        setLoading(false);
+        return;
+      }
+
+      setLandlordId(landlord.id);
+      setLandlordName(landlord.full_name || "");
+      setBusinessName(landlord.business_name || "");
       setCheckingAuth(false);
-      await loadData();
+      await loadData(landlord.id);
     }
+
     init();
   }, [router]);
 
-  async function loadData() {
-    setLoading(true);
-    setError(null);
-    const { data: overview, error: overviewError } = await supabase
-      .from("tenant_overview")
-      .select("*")
-      .order("house_code");
-    if (overviewError) {
-      setError(overviewError.message);
+  async function loadData(lid?: string) {
+    const id = lid || landlordId;
+    if (!id) {
       setLoading(false);
       return;
     }
-    const { data: tenantExtras } = await supabase
+
+    setLoading(true);
+    setError(null);
+
+    // Only this landlord's tenants
+    const { data: tenants, error: tenantsError } = await supabase
       .from("tenants")
-      .select("id, email, auth_user_id");
-    const extraMap: Record<string, { email: string; auth_user_id: string }> =
-      {};
-    (tenantExtras || []).forEach((t: any) => {
-      extraMap[t.id] = {
+      .select(
+        `
+        id,
+        full_name,
+        phone,
+        email,
+        auth_user_id,
+        house_id,
+        houses (
+          id,
+          code,
+          name,
+          monthly_rent,
+          bank_account,
+          landlord_id
+        )
+      `
+      )
+      .eq("landlord_id", id)
+      .order("full_name");
+
+    if (tenantsError) {
+      setError(tenantsError.message);
+      setLoading(false);
+      return;
+    }
+
+    const tenantIds = (tenants || []).map((t: any) => t.id);
+
+    let balances: any[] = [];
+    if (tenantIds.length > 0) {
+      const { data: balData } = await supabase
+        .from("tenant_balances")
+        .select(
+          "tenant_id, current_balance, next_due_date, months_in_advance, status"
+        )
+        .in("tenant_id", tenantIds);
+      balances = balData || [];
+    }
+
+    const balMap: Record<string, any> = {};
+    balances.forEach((b) => {
+      balMap[b.tenant_id] = b;
+    });
+
+    const merged = (tenants || []).map((t: any) => {
+      const house = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+      const bal = balMap[t.id] || {};
+      return {
+        tenant_id: t.id,
+        full_name: t.full_name,
+        phone: t.phone,
         email: t.email || "",
         auth_user_id: t.auth_user_id || "",
+        house_code: house?.code || "",
+        house_name: house?.name || "",
+        monthly_rent: house?.monthly_rent || 0,
+        bank_account: house?.bank_account || "",
+        current_balance: bal.current_balance ?? 0,
+        next_due_date: bal.next_due_date || null,
+        months_in_advance: bal.months_in_advance || 0,
+        status: bal.status || "upcoming",
       };
     });
-    const merged = (overview || []).map((row: any) => ({
-      ...row,
-      email: extraMap[row.tenant_id]?.email || "",
-      auth_user_id: extraMap[row.tenant_id]?.auth_user_id || "",
-    }));
+
+    // Sort by house code
+    merged.sort((a: any, b: any) =>
+      String(a.house_code).localeCompare(String(b.house_code))
+    );
+
     setRows(merged);
     setLoading(false);
   }
@@ -204,7 +303,6 @@ export default function LandlordDashboard() {
     setCreatingLogin(true);
     setLoginMessage(null);
 
-    // Keep landlord session — only use Edge Function
     const { data, error } = await supabase.functions.invoke(
       "create-tenant-user",
       {
@@ -221,7 +319,7 @@ export default function LandlordDashboard() {
       setLoginMessage(
         "Error: " +
           error.message +
-          " (Deploy the create-tenant-user Edge Function first)"
+          " — Use manual link in Supabase Auth if Edge Function is not deployed."
       );
       setCreatingLogin(false);
       return;
@@ -232,7 +330,7 @@ export default function LandlordDashboard() {
       return;
     }
 
-    setLoginMessage(`Login created. Tenant signs in with ${loginEmail}`);
+    setLoginMessage(`Login created for ${loginEmail}`);
     setEditing({
       ...editing,
       email: loginEmail,
@@ -326,9 +424,14 @@ export default function LandlordDashboard() {
                 <div className="w-8 h-8 rounded-lg bg-green-600 flex items-center justify-center">
                   <span className="text-white text-sm font-bold">R</span>
                 </div>
-                <span className="font-bold text-slate-900 tracking-tight">
-                  Rental Manager
-                </span>
+                <div className="leading-tight">
+                  <span className="font-bold text-slate-900 tracking-tight block">
+                    {businessName || "Rental Manager"}
+                  </span>
+                  <span className="text-[11px] text-slate-500 hidden sm:block">
+                    {landlordName}
+                  </span>
+                </div>
               </div>
               <nav className="hidden md:flex items-center gap-1">
                 {navLink("/dashboard", "Dashboard", true)}
@@ -338,15 +441,34 @@ export default function LandlordDashboard() {
                 {navLink("/reminders", "Reminders")}
               </nav>
             </div>
-            <button
-              onClick={handleLogout}
-              className="text-sm text-slate-500 hover:text-slate-800 font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition"
-            >
-              Logout
-            </button>
+
+            {/* Signed-in account */}
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs text-slate-500">Signed in as</p>
+                <p className="text-sm font-medium text-slate-800 max-w-[200px] truncate">
+                  {accountEmail}
+                </p>
+              </div>
+              <div className="w-9 h-9 rounded-full bg-green-100 text-green-800 flex items-center justify-center text-sm font-bold">
+                {(accountEmail || "?").charAt(0).toUpperCase()}
+              </div>
+              <button
+                onClick={handleLogout}
+                className="text-sm text-slate-500 hover:text-slate-800 font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
+
+      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between">
+        <p className="text-xs text-slate-500 truncate">
+          Signed in: <span className="font-medium text-slate-700">{accountEmail}</span>
+        </p>
+      </div>
 
       <div className="md:hidden bg-white border-b border-slate-200 overflow-x-auto">
         <div className="flex gap-1.5 px-4 py-2.5 min-w-max">
@@ -365,7 +487,8 @@ export default function LandlordDashboard() {
               Overview
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              Manage properties, tenants, and rent collection
+              {businessName ? `${businessName} · ` : ""}
+              Your properties only
             </p>
           </div>
           <button
@@ -430,7 +553,7 @@ export default function LandlordDashboard() {
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Houses & Tenants</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              3 months advance: Lipanda, Chisoni, Emily, Gift Mphande
+              Only properties belonging to this account
             </p>
           </div>
 
@@ -440,8 +563,16 @@ export default function LandlordDashboard() {
               <p className="text-slate-400 text-sm">Loading...</p>
             </div>
           ) : rows.length === 0 ? (
-            <div className="p-12 text-center text-slate-500 text-sm">
-              No properties yet. Click <strong>Add Property</strong> to start.
+            <div className="p-12 text-center">
+              <p className="text-slate-500 text-sm mb-4">
+                No properties yet for <strong>{accountEmail}</strong>
+              </p>
+              <button
+                onClick={() => setShowAdd(true)}
+                className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl"
+              >
+                + Add your first property
+              </button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -511,7 +642,7 @@ export default function LandlordDashboard() {
                         )}
                       </td>
                       <td className="px-5 py-4 font-medium text-slate-800 whitespace-nowrap">
-                        {row.next_due_date}
+                        {row.next_due_date || "—"}
                       </td>
                       <td className="px-5 py-4 font-semibold text-red-600 whitespace-nowrap">
                         {formatMK(Number(row.current_balance))}
@@ -544,11 +675,9 @@ export default function LandlordDashboard() {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
             <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-bold text-slate-900">
-                Add Property
-              </h3>
+              <h3 className="text-lg font-bold text-slate-900">Add Property</h3>
               <p className="text-sm text-slate-500 mt-0.5">
-                New house and tenant
+                Added under {accountEmail}
               </p>
             </div>
             <form onSubmit={handleAddProperty}>
@@ -583,7 +712,6 @@ export default function LandlordDashboard() {
                         })
                       }
                       className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                      placeholder="150000"
                     />
                   </div>
                   <div className="col-span-2">
@@ -597,7 +725,6 @@ export default function LandlordDashboard() {
                         setAddForm({ ...addForm, house_name: e.target.value })
                       }
                       className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                      placeholder="Chileka House 6"
                     />
                   </div>
                   <div className="col-span-2">
@@ -611,7 +738,6 @@ export default function LandlordDashboard() {
                         setAddForm({ ...addForm, tenant_name: e.target.value })
                       }
                       className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                      placeholder="John Banda"
                     />
                   </div>
                   <div>
@@ -624,7 +750,6 @@ export default function LandlordDashboard() {
                         setAddForm({ ...addForm, phone: e.target.value })
                       }
                       className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                      placeholder="26599..."
                     />
                   </div>
                   <div>
@@ -638,7 +763,6 @@ export default function LandlordDashboard() {
                         setAddForm({ ...addForm, email: e.target.value })
                       }
                       className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                      placeholder="optional"
                     />
                   </div>
                   <div>
@@ -711,14 +835,12 @@ export default function LandlordDashboard() {
         </div>
       )}
 
-      {/* Edit Modal — same as before with Create Login */}
+      {/* Edit Modal */}
       {editing && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
             <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-bold text-slate-900">
-                Edit Property
-              </h3>
+              <h3 className="text-lg font-bold text-slate-900">Edit Property</h3>
               <p className="text-sm text-slate-500 mt-0.5">
                 {editing.house_code} · {editing.full_name}
               </p>
@@ -796,7 +918,7 @@ export default function LandlordDashboard() {
                   </label>
                   <input
                     type="date"
-                    value={editing.next_due_date}
+                    value={editing.next_due_date || ""}
                     onChange={(e) =>
                       setEditing({ ...editing, next_due_date: e.target.value })
                     }
@@ -870,8 +992,8 @@ export default function LandlordDashboard() {
                     Tenant login
                   </h4>
                   <p className="text-xs text-slate-500 mb-3">
-                    Uses the server function so your landlord session stays
-                    active. Deploy create-tenant-user first.
+                    Create a portal login for this tenant (requires Edge
+                    Function), or link manually in Supabase Auth.
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
