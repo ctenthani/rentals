@@ -252,7 +252,34 @@ export default function LandlordDashboard() {
     setLoginPassword("");
     setLoginMessage(null);
   };
+const handleDelete = async () => {
+  if (!editing) return;
+  if (
+    !confirm(
+      `Delete ${editing.house_name} / ${editing.full_name}? This cannot be undone.`
+    )
+  )
+    return;
 
+  setSaving(true);
+  const { data, error } = await supabase.rpc("landlord_delete_property", {
+    p_tenant_id: editing.tenant_id,
+  });
+  setSaving(false);
+
+  if (error) {
+    setError(error.message);
+    return;
+  }
+  if (data?.success === false) {
+    setError(data.error || "Delete failed");
+    return;
+  }
+
+  setEditing(null);
+  setSuccess("Property removed");
+  await loadData();
+};
   const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
