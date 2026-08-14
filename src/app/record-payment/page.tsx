@@ -252,6 +252,19 @@ await supabase.rpc("record_landlord_payment", {
   p_months: monthsCovered, // from amount / rent
   p_paid_for_month: paidForMonth + "-01",
 });
+ // After you have session and landlordId (same resolve logic as dashboard):
+
+const { data: tenants } = await supabase
+  .from("tenants")
+  .select(
+    `
+    id,
+    full_name,
+    houses ( name, code, monthly_rent )
+  `
+  )
+  .eq("landlord_id", landlordId)
+  .order("full_name");
             </button>
           </form>
         </div>
