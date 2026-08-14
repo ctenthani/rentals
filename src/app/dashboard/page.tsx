@@ -69,7 +69,6 @@ const emptyAdd = {
 
 export default function LandlordDashboard() {
   const [rows, setRows] = useState<any[]>([]);
-  const [recentPayments, setRecentPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -232,22 +231,6 @@ export default function LandlordDashboard() {
       String(a.house_code).localeCompare(String(b.house_code))
     );
     setRows(merged);
-
-    if (tenantIds.length > 0) {
-      const { data: pays } = await supabase
-        .from("payments")
-        .select(
-          `id, amount, paid_date, months_covered, method,
-           tenants ( full_name )`
-        )
-        .in("tenant_id", tenantIds)
-        .order("paid_date", { ascending: false })
-        .limit(8);
-      setRecentPayments(pays || []);
-    } else {
-      setRecentPayments([]);
-    }
-
     setLoading(false);
   }
 
@@ -483,7 +466,7 @@ export default function LandlordDashboard() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Overview</h1>
             <p className="text-xs text-slate-500">
-              Properties, dues, paid months & receipts
+              Properties, dues & paid months
             </p>
           </div>
           <button
@@ -540,58 +523,6 @@ export default function LandlordDashboard() {
         {success && (
           <div className="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-800 text-sm">
             {success}
-          </div>
-        )}
-
-        {/* Recent payments + receipts */}
-        {recentPayments.length > 0 && (
-          <div className="mb-5 bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="font-bold text-slate-800 text-sm">
-                Recent payments
-              </h2>
-              <Link
-                href="/payments"
-                className="text-xs font-semibold text-emerald-700 hover:underline"
-              >
-                View all
-              </Link>
-            </div>
-            <div className="space-y-2">
-              {recentPayments.map((p) => {
-                const t = Array.isArray(p.tenants) ? p.tenants[0] : p.tenants;
-                return (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 text-sm border-b border-slate-50 last:border-0 pb-2 last:pb-0"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium text-slate-800 truncate">
-                        {t?.full_name || "Tenant"}
-                      </p>
-                      <p className="text-[11px] text-slate-400">
-                        {p.paid_date}
-                        {p.months_covered
-                          ? ` · ${p.months_covered} mo`
-                          : ""}
-                        {p.method ? ` · ${p.method}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-bold text-emerald-700">
-                        {formatMK(Number(p.amount))}
-                      </span>
-                      <Link
-                        href={`/receipt?id=${p.id}`}
-                        className="bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg"
-                      >
-                        Receipt
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         )}
 
