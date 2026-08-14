@@ -110,6 +110,20 @@ export default function SettingsPage() {
             className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium py-2.5 rounded-xl"
           >
             {loading ? "Updating..." : "Update password"}
+          // state
+const [inviteEmail, setInviteEmail] = useState("");
+const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+
+const handleInvite = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setInviteMsg(null);
+  const { data, error } = await supabase.rpc("invite_landlord_member", {
+    p_email: inviteEmail,
+  });
+  if (error) setInviteMsg("Error: " + error.message);
+  else if (data?.success === false) setInviteMsg("Error: " + data.error);
+  else setInviteMsg("Member added. They can sign in and see this account.");
+};
           </button>
         </form>
       </main>
