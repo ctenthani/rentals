@@ -230,6 +230,28 @@ export default function RecordPaymentPage() {
               className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium py-3 rounded-xl"
             >
               {saving ? "Saving..." : "Record Payment"}
+              const [paidForMonth, setPaidForMonth] = useState(
+  new Date().toISOString().slice(0, 7) // YYYY-MM
+);
+
+// In the form:
+<label className="block text-sm font-medium mb-1">
+  Payment is for month
+</label>
+<input
+  type="month"
+  value={paidForMonth}
+  onChange={(e) => setPaidForMonth(e.target.value)}
+  className="w-full border rounded-xl px-3 py-2.5 text-sm"
+/>
+
+// When calling RPC:
+await supabase.rpc("record_landlord_payment", {
+  p_tenant_id: selectedTenantId,
+  p_amount: Number(amount),
+  p_months: monthsCovered, // from amount / rent
+  p_paid_for_month: paidForMonth + "-01",
+});
             </button>
           </form>
         </div>
