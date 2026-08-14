@@ -439,6 +439,7 @@ export default function LandlordDashboard() {
                 {navLink("/record-payment", "Record Payment")}
                 {navLink("/payments", "Payments")}
                 {navLink("/reminders", "Reminders")}
+                {navLink("/settings", "Settings")}
               </nav>
             </div>
 
