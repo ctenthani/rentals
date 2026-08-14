@@ -13,7 +13,11 @@ export default function SettingsPage() {
   const [accountEmail, setAccountEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [businessName, setBusinessName] = useState("");
+  const [plan, setPlan] = useState("free");
+  const [maxTenants, setMaxTenants] = useState(1);
+  const [tenantCount, setTenantCount] = useState(0);
   const [isOwner, setIsOwner] = useState(false);
+  const [landlordId, setLandlordId] = useState<string | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -47,7 +51,6 @@ export default function SettingsPage() {
 
       setAccountEmail(session.user.email || "");
 
-      // Tenant? redirect
       const { data: tenantCheck } = await supabase
         .from("tenants")
         .select("id")
@@ -59,29 +62,37 @@ export default function SettingsPage() {
         return;
       }
 
-      // Owner profile
       const { data: landlord } = await supabase
         .from("landlords")
-        .select("id, full_name, business_name")
+        .select("id, full_name, business_name, plan, max_tenants")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
 
       if (landlord) {
         setIsOwner(true);
+        setLandlordId(landlord.id);
         setFullName(landlord.full_name || "");
         setBusinessName(landlord.business_name || "");
+        setPlan(landlord.plan || "free");
+        setMaxTenants(landlord.max_tenants ?? 1);
+
+        const { count } = await supabase
+          .from("tenants")
+          .select("id", { count: "exact", head: true })
+          .eq("landlord_id", landlord.id);
+        setTenantCount(count || 0);
 
         const { data: mem } = await supabase
           .from("landlord_members")
           .select("id, email, role, auth_user_id")
           .eq("landlord_id", landlord.id);
-
         setMembers(mem || []);
       } else {
-        // Co-manager: show the account they manage
         const { data: membership } = await supabase
           .from("landlord_members")
-          .select("landlord_id, landlords(full_name, business_name)")
+          .select(
+            "landlord_id, landlords(id, full_name, business_name, plan, max_tenants)"
+          )
           .eq("auth_user_id", session.user.id)
           .maybeSingle();
 
@@ -89,9 +100,19 @@ export default function SettingsPage() {
           const L = Array.isArray(membership.landlords)
             ? membership.landlords[0]
             : membership.landlords;
+          const lid = (L as any)?.id || membership.landlord_id;
           setIsOwner(false);
+          setLandlordId(lid);
           setFullName((L as any)?.full_name || "");
           setBusinessName((L as any)?.business_name || "");
+          setPlan((L as any)?.plan || "free");
+          setMaxTenants((L as any)?.max_tenants ?? 1);
+
+          const { count } = await supabase
+            .from("tenants")
+            .select("id", { count: "exact", head: true })
+            .eq("landlord_id", lid);
+          setTenantCount(count || 0);
         }
       }
 
@@ -100,25 +121,7 @@ export default function SettingsPage() {
 
     init();
   }, [router]);
-{/* Plan */}
-<div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-  <h2 className="font-semibold text-slate-900 mb-2">Subscription</h2>
-  <p className="text-sm text-slate-700">
-    Plan:{" "}
-    <span className="font-semibold capitalize">{plan || "free"}</span>
-  </p>
-  <p className="text-xs text-slate-500 mt-1">
-    {plan === "pro"
-      ? "Pro — unlimited properties"
-      : "Free — 1 tenant included. Upgrade to add more."}
-  </p>
-  {plan !== "pro" && (
-    <p className="text-xs text-slate-500 mt-3">
-      To upgrade, contact support or pay for Pro. Your account will be
-      switched to Pro after payment.
-    </p>
-  )}
-</div>
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isOwner) return;
@@ -184,18 +187,11 @@ export default function SettingsPage() {
       setInviteMsg("Member added. They can sign in and manage this account.");
       setInviteEmail("");
 
-      // Refresh members
-      const { data: landlord } = await supabase
-        .from("landlords")
-        .select("id")
-        .eq("auth_user_id", (await supabase.auth.getUser()).data.user?.id || "")
-        .maybeSingle();
-
-      if (landlord) {
+      if (landlordId) {
         const { data: mem } = await supabase
           .from("landlord_members")
           .select("id, email, role, auth_user_id")
-          .eq("landlord_id", landlord.id);
+          .eq("landlord_id", landlordId);
         setMembers(mem || []);
       }
     }
@@ -211,16 +207,16 @@ export default function SettingsPage() {
     );
   }
 
+  const isPro = plan === "pro";
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b sticky top-0 z-40">
-        <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="text-slate-600 text-sm">
-              ← Dashboard
-            </Link>
-            <h1 className="font-semibold text-slate-900">Settings</h1>
-          </div>
+        <div className="max-w-lg mx-auto px-4 h-14 flex items-center gap-4">
+          <Link href="/dashboard" className="text-slate-600 text-sm">
+            ← Dashboard
+          </Link>
+          <h1 className="font-semibold text-slate-900">Settings</h1>
         </div>
       </header>
 
@@ -234,6 +230,55 @@ export default function SettingsPage() {
           <p className="text-xs text-slate-500 mt-1">
             {isOwner ? "Account owner" : "Co-manager"}
           </p>
+        </div>
+
+        {/* Subscription */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-slate-900">Subscription</h2>
+              <p className="text-sm text-slate-700 mt-2">
+                Plan:{" "}
+                <span
+                  className={`font-semibold capitalize ${
+                    isPro ? "text-emerald-700" : "text-slate-800"
+                  }`}
+                >
+                  {plan || "free"}
+                </span>
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {tenantCount} / {maxTenants === 500 ? "∞" : maxTenants} tenants
+                used
+              </p>
+            </div>
+            <span
+              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
+                isPro
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {isPro ? "PRO" : "FREE"}
+            </span>
+          </div>
+
+          {isPro ? (
+            <p className="text-xs text-emerald-700 bg-emerald-50 rounded-xl p-3 mt-4">
+              Pro plan — you can add many properties.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs text-slate-600 bg-slate-50 rounded-xl p-3">
+                Free plan includes <strong>1 tenant</strong>. Upgrade to Pro to
+                manage more properties.
+              </p>
+              <p className="text-xs text-slate-500">
+                To upgrade, contact the app owner. After payment your account
+                will be switched to Pro.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Profile */}
@@ -343,13 +388,13 @@ export default function SettingsPage() {
           </button>
         </form>
 
-        {/* Co-managers (owner only) */}
+        {/* Team (owner only) */}
         {isOwner && (
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
             <h2 className="font-semibold text-slate-900">Team access</h2>
             <p className="text-xs text-slate-500">
-              Invite another user who has already signed up. They will see the
-              same properties as you.
+              Invite someone who has already signed up. They will see the same
+              properties as you.
             </p>
 
             {members.length > 0 && (
@@ -359,7 +404,9 @@ export default function SettingsPage() {
                     key={m.id}
                     className="flex justify-between items-center text-sm border border-slate-100 rounded-xl px-3 py-2"
                   >
-                    <span className="text-slate-800">{m.email || m.auth_user_id}</span>
+                    <span className="text-slate-800">
+                      {m.email || m.auth_user_id}
+                    </span>
                     <span className="text-xs text-slate-500 capitalize">
                       {m.role}
                     </span>
@@ -408,7 +455,7 @@ export default function SettingsPage() {
 
         <p className="text-center text-xs text-slate-400 pb-8">
           <Link href="/auth/forgot-password" className="text-green-700">
-            Forgot password flow
+            Forgot password
           </Link>
           {" · "}
           <Link href="/dashboard" className="text-green-700">
