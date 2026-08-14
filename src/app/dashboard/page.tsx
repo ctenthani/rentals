@@ -19,19 +19,23 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
-function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
-  if (!nextDueDate) return "—";
+function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number): string {
+  if (!nextDueDate) return "No payments recorded";
   const months: string[] = [];
   const d = new Date(nextDueDate + "T12:00:00");
+  if (Number.isNaN(d.getTime())) return "—";
+
+  // Last paid month is the month before next due
   d.setMonth(d.getMonth() - 1);
-  const count = Math.max(Number(monthsInAdvance) || 0, 6);
+
+  const count = Math.max(Number(monthsInAdvance) || 1, 1);
   for (let i = 0; i < count; i++) {
     months.unshift(
       d.toLocaleString("en", { month: "short", year: "numeric" })
     );
     d.setMonth(d.getMonth() - 1);
   }
-  return months.join(", ");
+  return months.join(" · ");
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -89,6 +93,12 @@ export default function LandlordDashboard() {
 
   useEffect(() => {
     async function init() {
+      try {
+        await supabase.rpc("expire_due_leases");
+      } catch {
+        /* optional */
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -111,14 +121,12 @@ export default function LandlordDashboard() {
         return;
       }
 
-      // Owner landlord
       let { data: landlord } = await supabase
         .from("landlords")
         .select("id, full_name, business_name")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
 
-      // Co-manager
       if (!landlord) {
         const { data: membership } = await supabase
           .from("landlord_members")
@@ -205,13 +213,18 @@ export default function LandlordDashboard() {
 
     const tenantIds = (tenants || []).map((t: any) => t.id);
     let balances: any[] = [];
+
     if (tenantIds.length > 0) {
-      const { data: balData } = await supabase
+      const { data: balData, error: balError } = await supabase
         .from("tenant_balances")
         .select(
           "tenant_id, current_balance, next_due_date, months_in_advance, status"
         )
         .in("tenant_id", tenantIds);
+
+      if (balError) {
+        console.error(balError);
+      }
       balances = balData || [];
     }
 
@@ -231,11 +244,11 @@ export default function LandlordDashboard() {
         auth_user_id: t.auth_user_id || "",
         house_code: house?.code || "",
         house_name: house?.name || "",
-        monthly_rent: house?.monthly_rent || 0,
+        monthly_rent: Number(house?.monthly_rent || 0),
         bank_account: house?.bank_account || "",
-        current_balance: bal.current_balance ?? 0,
+        current_balance: Number(bal.current_balance ?? 0),
         next_due_date: bal.next_due_date || null,
-        months_in_advance: bal.months_in_advance || 0,
+        months_in_advance: Number(bal.months_in_advance || 0),
         status: bal.status || "upcoming",
       };
     });
@@ -254,7 +267,10 @@ export default function LandlordDashboard() {
   };
 
   const openEdit = (row: any) => {
-    setEditing({ ...row });
+    setEditing({
+      ...row,
+      next_due_date: row.next_due_date || "",
+    });
     setSuccess(null);
     setError(null);
     setLoginEmail(row.email || "");
@@ -279,7 +295,7 @@ export default function LandlordDashboard() {
           p_house_name: editing.house_name,
           p_monthly_rent: Number(editing.monthly_rent),
           p_bank_account: editing.bank_account,
-          p_next_due_date: editing.next_due_date,
+          p_next_due_date: editing.next_due_date || null,
           p_current_balance: Number(editing.current_balance),
           p_status: editing.status,
           p_months_in_advance: Number(editing.months_in_advance || 0),
@@ -359,11 +375,7 @@ export default function LandlordDashboard() {
     );
 
     if (error) {
-      setLoginMessage(
-        "Error: " +
-          error.message +
-          " — Link manually in Supabase Auth if Edge Function is not deployed."
-      );
+      setLoginMessage("Error: " + error.message);
       setCreatingLogin(false);
       return;
     }
@@ -424,7 +436,7 @@ export default function LandlordDashboard() {
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
           <p className="text-slate-500 text-sm">Loading dashboard...</p>
@@ -447,7 +459,7 @@ export default function LandlordDashboard() {
   const navLink = (href: string, label: string, active = false) => (
     <Link
       href={href}
-      className={`px-3.5 py-2 text-sm font-medium rounded-lg transition ${
+      className={`px-3 py-2 text-sm font-medium rounded-lg whitespace-nowrap ${
         active
           ? "text-green-800 bg-green-100"
           : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -458,47 +470,37 @@ export default function LandlordDashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-green-600 flex items-center justify-center">
-                  <span className="text-white text-sm font-bold">R</span>
-                </div>
-                <div className="leading-tight">
-                  <span className="font-bold text-slate-900 tracking-tight block">
-                    {businessName || "Rental Manager"}
-                  </span>
-                  <span className="text-[11px] text-slate-500 hidden sm:block">
-                    {landlordName}
-                  </span>
-                </div>
+    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4">
+          <div className="flex justify-between items-center h-14 gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 shrink-0 rounded-lg bg-green-600 flex items-center justify-center">
+                <span className="text-white text-sm font-bold">R</span>
               </div>
-              <nav className="hidden md:flex items-center gap-1">
-                {navLink("/dashboard", "Dashboard", true)}
-                {navLink("/pending", "Pending")}
-                {navLink("/record-payment", "Record Payment")}
-                {navLink("/payments", "Payments")}
-                {navLink("/reminders", "Reminders")}
-                {navLink("/settings", "Settings")}
-              </nav>
+              <div className="min-w-0">
+                <p className="font-bold text-slate-900 text-sm truncate">
+                  {businessName || "Rental Manager"}
+                </p>
+                <p className="text-[11px] text-slate-500 truncate hidden sm:block">
+                  {landlordName}
+                </p>
+              </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 shrink-0">
               <div className="text-right hidden sm:block">
-                <p className="text-xs text-slate-500">Signed in as</p>
-                <p className="text-sm font-medium text-slate-800 max-w-[200px] truncate">
+                <p className="text-[10px] text-slate-500">Signed in</p>
+                <p className="text-xs font-medium text-slate-800 max-w-[140px] truncate">
                   {accountEmail}
                 </p>
               </div>
-              <div className="w-9 h-9 rounded-full bg-green-100 text-green-800 flex items-center justify-center text-sm font-bold">
+              <div className="w-8 h-8 rounded-full bg-green-100 text-green-800 flex items-center justify-center text-sm font-bold">
                 {(accountEmail || "?").charAt(0).toUpperCase()}
               </div>
               <button
                 onClick={handleLogout}
-                className="text-sm text-slate-500 hover:text-slate-800 font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition"
+                className="text-xs text-slate-500 hover:text-slate-800 font-medium px-2 py-1"
               >
                 Logout
               </button>
@@ -507,15 +509,9 @@ export default function LandlordDashboard() {
         </div>
       </header>
 
-      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-2">
-        <p className="text-xs text-slate-500 truncate">
-          Signed in:{" "}
-          <span className="font-medium text-slate-700">{accountEmail}</span>
-        </p>
-      </div>
-
-      <div className="md:hidden bg-white border-b border-slate-200 overflow-x-auto">
-        <div className="flex gap-1.5 px-4 py-2.5 min-w-max">
+      {/* Nav — wraps, no horizontal page scroll */}
+      <div className="bg-white border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 py-2 flex flex-wrap gap-1">
           {navLink("/dashboard", "Dashboard", true)}
           {navLink("/pending", "Pending")}
           {navLink("/record-payment", "Record")}
@@ -525,16 +521,11 @@ export default function LandlordDashboard() {
         </div>
       </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <main className="max-w-5xl mx-auto px-4 py-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Overview
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              {businessName ? `${businessName} · ` : ""}
-              Your properties only
-            </p>
+            <h1 className="text-xl font-bold text-slate-900">Overview</h1>
+            <p className="text-sm text-slate-500">Your properties only</p>
           </div>
           <button
             onClick={() => {
@@ -542,335 +533,254 @@ export default function LandlordDashboard() {
               setAddForm({ ...emptyAdd });
               setError(null);
             }}
-            className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm transition"
+            className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl self-start"
           >
             + Add Property
           </button>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Expected Rent
+        {/* Stats — 2x2 on mobile, no overflow */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-[11px] font-medium text-slate-500 uppercase">
+              Expected
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
+            <p className="text-lg font-bold text-slate-900 mt-1 break-words">
               {loading ? "—" : formatMK(totalExpected)}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-[11px] font-medium text-slate-500 uppercase">
               Outstanding
             </p>
-            <p className="text-2xl font-bold text-red-600 mt-2 tracking-tight">
+            <p className="text-lg font-bold text-red-600 mt-1 break-words">
               {loading ? "—" : formatMK(totalOutstanding)}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-[11px] font-medium text-slate-500 uppercase">
               Paid / Overdue
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
+            <p className="text-lg font-bold text-slate-900 mt-1">
               {loading ? "—" : `${paidCount} / ${overdueCount}`}
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <p className="text-[11px] font-medium text-slate-500 uppercase">
               Properties
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
+            <p className="text-lg font-bold text-slate-900 mt-1">
               {loading ? "—" : rows.length}
             </p>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
+          <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm break-words">
             {error}
           </div>
         )}
         {success && (
-          <div className="mb-4 p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-sm">
+          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-sm">
             {success}
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-slate-100">
-            <h2 className="font-semibold text-slate-900">Houses & Tenants</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Only properties belonging to this account
-            </p>
-          </div>
+        {/* Card list — no horizontal scroll */}
+        <div className="space-y-3">
+          <h2 className="font-semibold text-slate-900 px-1">
+            Houses & Tenants
+          </h2>
 
           {loading ? (
-            <div className="p-16 flex flex-col items-center gap-3">
+            <div className="bg-white rounded-2xl border p-10 flex justify-center">
               <div className="w-7 h-7 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-              <p className="text-slate-400 text-sm">Loading...</p>
             </div>
           ) : rows.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-slate-500 text-sm mb-4">
-                No properties yet for <strong>{accountEmail}</strong>
-              </p>
+            <div className="bg-white rounded-2xl border p-10 text-center text-slate-500 text-sm">
+              No properties yet.{" "}
               <button
                 onClick={() => setShowAdd(true)}
-                className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl"
+                className="text-green-700 font-semibold"
               >
-                + Add your first property
+                Add your first
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50/90 text-left">
-                    {[
-                      "House",
-                      "Tenant",
-                      "Phone",
-                      "Email",
-                      "Login",
-                      "Rent",
-                      "Paid Months",
-                      "Next Due",
-                      "Balance",
-                      "Status",
-                      "Bank",
-                      "",
-                    ].map((h) => (
-                      <th
-                        key={h || "a"}
-                        className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rows.map((row) => (
-                    <tr
-                      key={row.tenant_id}
-                      className="hover:bg-slate-50/80 transition"
-                    >
-                      <td className="px-5 py-4 font-medium text-slate-900 whitespace-nowrap">
-                        {row.house_name}
-                      </td>
-                      <td className="px-5 py-4 text-slate-800 whitespace-nowrap">
-                        {row.full_name}
-                      </td>
-                      <td className="px-5 py-4 text-slate-500 whitespace-nowrap">
-                        {row.phone || "—"}
-                      </td>
-                      <td className="px-5 py-4 text-slate-500 text-xs max-w-[140px] truncate">
-                        {row.email || "—"}
-                      </td>
-                      <td className="px-5 py-4">
-                        {row.auth_user_id ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            Linked
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 font-medium">
-                            None
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4 text-slate-700 whitespace-nowrap">
-                        {formatMK(Number(row.monthly_rent))}
-                      </td>
-                      <td className="px-5 py-4 text-slate-600 text-xs leading-relaxed max-w-[200px]">
-                        {getPaidMonths(
-                          row.next_due_date,
-                          Number(row.months_in_advance || 0)
-                        )}
-                      </td>
-                      <td className="px-5 py-4 font-medium text-slate-800 whitespace-nowrap">
-                        {row.next_due_date || "—"}
-                      </td>
-                      <td className="px-5 py-4 font-semibold text-red-600 whitespace-nowrap">
-                        {formatMK(Number(row.current_balance))}
-                      </td>
-                      <td className="px-5 py-4">
-                        <StatusBadge status={row.status} />
-                      </td>
-                      <td className="px-5 py-4 text-slate-500 text-xs whitespace-nowrap">
-                        {row.bank_account}
-                      </td>
-                      <td className="px-5 py-4">
-                        <button
-                          onClick={() => openEdit(row)}
-                          className="text-green-700 hover:text-green-900 font-semibold text-sm hover:underline"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            rows.map((row) => (
+              <div
+                key={row.tenant_id}
+                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900 truncate">
+                      {row.house_name}
+                    </p>
+                    <p className="text-sm text-slate-600 truncate">
+                      {row.full_name}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {row.house_code}
+                      {row.phone ? ` · ${row.phone}` : ""}
+                    </p>
+                  </div>
+                  <StatusBadge status={row.status} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase">Rent</p>
+                    <p className="font-medium text-slate-800">
+                      {formatMK(row.monthly_rent)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase">
+                      Balance
+                    </p>
+                    <p className="font-semibold text-red-600">
+                      {formatMK(row.current_balance)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase">
+                      Next due
+                    </p>
+                    <p className="font-semibold text-slate-900">
+                      {row.next_due_date || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase">
+                      Advance
+                    </p>
+                    <p className="font-medium text-slate-800">
+                      {row.months_in_advance || 0} mo
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl px-3 py-2 mb-3">
+                  <p className="text-[11px] text-slate-500 uppercase mb-0.5">
+                    Paid months
+                  </p>
+                  <p className="text-sm text-slate-800 leading-snug break-words">
+                    {getPaidMonths(row.next_due_date, row.months_in_advance)}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => openEdit(row)}
+                    className="text-sm font-semibold text-green-700 hover:underline"
+                  >
+                    Edit
+                  </button>
+                  <Link
+                    href={`/lease?tenant_id=${row.tenant_id}`}
+                    className="text-sm font-medium text-slate-600 hover:underline"
+                  >
+                    Lease
+                  </Link>
+                  <span className="text-xs text-slate-400 self-center">
+                    Bank {row.bank_account || "—"}
+                  </span>
+                  {row.auth_user_id ? (
+                    <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full ml-auto">
+                      Login linked
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))
           )}
         </div>
       </main>
 
-      {/* Add Property Modal */}
+      {/* Add modal */}
       {showAdd && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
-            <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-bold text-slate-900">Add Property</h3>
-              <p className="text-sm text-slate-500 mt-0.5">
-                Added under {accountEmail}
-              </p>
+        <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+          <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[95vh] overflow-y-auto">
+            <div className="px-5 py-4 border-b">
+              <h3 className="text-lg font-bold">Add Property</h3>
             </div>
-            <form onSubmit={handleAddProperty}>
-              <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      House Code *
-                    </label>
-                    <input
-                      required
-                      value={addForm.house_code}
-                      onChange={(e) =>
-                        setAddForm({ ...addForm, house_code: e.target.value })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                      placeholder="H11"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Monthly Rent *
-                    </label>
-                    <input
-                      required
-                      type="number"
-                      value={addForm.monthly_rent}
-                      onChange={(e) =>
-                        setAddForm({
-                          ...addForm,
-                          monthly_rent: e.target.value,
-                        })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      House Name *
-                    </label>
-                    <input
-                      required
-                      value={addForm.house_name}
-                      onChange={(e) =>
-                        setAddForm({ ...addForm, house_name: e.target.value })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Tenant Name *
-                    </label>
-                    <input
-                      required
-                      value={addForm.tenant_name}
-                      onChange={(e) =>
-                        setAddForm({ ...addForm, tenant_name: e.target.value })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Phone
-                    </label>
-                    <input
-                      value={addForm.phone}
-                      onChange={(e) =>
-                        setAddForm({ ...addForm, phone: e.target.value })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={addForm.email}
-                      onChange={(e) =>
-                        setAddForm({ ...addForm, email: e.target.value })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Bank Account
-                    </label>
-                    <input
-                      value={addForm.bank_account}
-                      onChange={(e) =>
-                        setAddForm({
-                          ...addForm,
-                          bank_account: e.target.value,
-                        })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Next Due Date
-                    </label>
-                    <input
-                      type="date"
-                      value={addForm.next_due_date}
-                      onChange={(e) =>
-                        setAddForm({
-                          ...addForm,
-                          next_due_date: e.target.value,
-                        })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                      Starting Balance
-                    </label>
-                    <input
-                      type="number"
-                      value={addForm.current_balance}
-                      onChange={(e) =>
-                        setAddForm({
-                          ...addForm,
-                          current_balance: e.target.value,
-                        })
-                      }
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                    />
-                  </div>
-                </div>
+            <form onSubmit={handleAddProperty} className="p-5 space-y-3">
+              <input
+                required
+                placeholder="House code *"
+                value={addForm.house_code}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, house_code: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+              />
+              <input
+                required
+                placeholder="House name *"
+                value={addForm.house_name}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, house_name: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+              />
+              <input
+                required
+                placeholder="Tenant name *"
+                value={addForm.tenant_name}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, tenant_name: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  required
+                  type="number"
+                  placeholder="Rent *"
+                  value={addForm.monthly_rent}
+                  onChange={(e) =>
+                    setAddForm({ ...addForm, monthly_rent: e.target.value })
+                  }
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                />
+                <input
+                  type="date"
+                  value={addForm.next_due_date}
+                  onChange={(e) =>
+                    setAddForm({ ...addForm, next_due_date: e.target.value })
+                  }
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                />
               </div>
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <input
+                placeholder="Phone"
+                value={addForm.phone}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, phone: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+              />
+              <input
+                placeholder="Bank account"
+                value={addForm.bank_account}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, bank_account: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+              />
+              <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
                   disabled={adding}
-                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm"
+                  className="flex-1 bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold"
                 >
-                  {adding ? "Adding..." : "Add Property"}
+                  {adding ? "Adding..." : "Add"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAdd(false)}
-                  className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
+                  className="px-4 border rounded-xl text-sm"
                 >
                   Cancel
                 </button>
@@ -880,100 +790,84 @@ export default function LandlordDashboard() {
         </div>
       )}
 
-      {/* Edit Modal */}
+      {/* Edit modal */}
       {editing && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
-            <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-bold text-slate-900">Edit Property</h3>
-              <p className="text-sm text-slate-500 mt-0.5">
+        <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+          <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[95vh] overflow-y-auto">
+            <div className="px-5 py-4 border-b">
+              <h3 className="text-lg font-bold">Edit Property</h3>
+              <p className="text-sm text-slate-500">
                 {editing.house_code} · {editing.full_name}
               </p>
             </div>
-            <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    House Name
-                  </label>
-                  <input
-                    type="text"
-                    value={editing.house_name || ""}
-                    onChange={(e) =>
-                      setEditing({ ...editing, house_name: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Tenant Name
-                  </label>
-                  <input
-                    type="text"
-                    value={editing.full_name || ""}
-                    onChange={(e) =>
-                      setEditing({ ...editing, full_name: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
+            <div className="p-5 space-y-3">
+              <input
+                value={editing.house_name || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, house_name: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                placeholder="House name"
+              />
+              <input
+                value={editing.full_name || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, full_name: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                placeholder="Tenant name"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  value={editing.phone || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, phone: e.target.value })
+                  }
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                  placeholder="Phone"
+                />
+                <input
+                  type="email"
+                  value={editing.email || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, email: e.target.value })
+                  }
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                  placeholder="Email"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Phone
-                  </label>
-                  <input
-                    type="text"
-                    value={editing.phone || ""}
-                    onChange={(e) =>
-                      setEditing({ ...editing, phone: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={editing.email || ""}
-                    onChange={(e) =>
-                      setEditing({ ...editing, email: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Monthly Rent
-                  </label>
+                  <label className="text-[11px] text-slate-500">Rent</label>
                   <input
                     type="number"
                     value={editing.monthly_rent}
                     onChange={(e) =>
                       setEditing({ ...editing, monthly_rent: e.target.value })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Next Due Date
+                  <label className="text-[11px] text-slate-500">
+                    Next due date
                   </label>
                   <input
                     type="date"
                     value={editing.next_due_date || ""}
                     onChange={(e) =>
-                      setEditing({ ...editing, next_due_date: e.target.value })
+                      setEditing({
+                        ...editing,
+                        next_due_date: e.target.value,
+                      })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
                   />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Current Balance
-                  </label>
+                  <label className="text-[11px] text-slate-500">Balance</label>
                   <input
                     type="number"
                     value={editing.current_balance}
@@ -983,12 +877,12 @@ export default function LandlordDashboard() {
                         current_balance: e.target.value,
                       })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Months in Advance
+                  <label className="text-[11px] text-slate-500">
+                    Months in advance
                   </label>
                   <input
                     type="number"
@@ -999,115 +893,90 @@ export default function LandlordDashboard() {
                         months_in_advance: e.target.value,
                       })
                     }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Status
-                  </label>
-                  <select
-                    value={editing.status}
-                    onChange={(e) =>
-                      setEditing({ ...editing, status: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                  >
-                    <option value="upcoming">Upcoming</option>
-                    <option value="overdue">Overdue</option>
-                    <option value="paid">Paid</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Bank Account
-                  </label>
-                  <input
-                    type="text"
-                    value={editing.bank_account}
-                    onChange={(e) =>
-                      setEditing({ ...editing, bank_account: e.target.value })
-                    }
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-
-                <div className="col-span-2 border-t border-slate-100 pt-5 mt-1">
-                  <h4 className="text-sm font-bold text-slate-900 mb-1">
-                    Tenant login
-                  </h4>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Create a portal login for this tenant (Edge Function) or
-                    link manually in Supabase Auth.
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Login email
-                      </label>
-                      <input
-                        type="email"
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Temporary password
-                      </label>
-                      <input
-                        type="text"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                  {loginMessage && (
-                    <p
-                      className={`text-xs mt-2 ${
-                        loginMessage.startsWith("Error")
-                          ? "text-red-600"
-                          : "text-emerald-600"
-                      }`}
-                    >
-                      {loginMessage}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleCreateLogin}
-                    disabled={creatingLogin}
-                    className="mt-3 w-full border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50 py-2.5 rounded-xl text-sm font-semibold"
-                  >
-                    {creatingLogin ? "Creating..." : "Create tenant login"}
-                  </button>
                 </div>
               </div>
-            </div>
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-3">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex-1 min-w-[120px] bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-2.5 rounded-xl font-semibold text-sm"
+              <select
+                value={editing.status}
+                onChange={(e) =>
+                  setEditing({ ...editing, status: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
               >
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={saving}
-                className="px-5 py-2.5 border border-red-200 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50"
-              >
-                Delete
-              </button>
-              <button
-                onClick={() => setEditing(null)}
-                className="px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
-              >
-                Cancel
-              </button>
+                <option value="upcoming">Upcoming</option>
+                <option value="overdue">Overdue</option>
+                <option value="paid">Paid</option>
+              </select>
+              <input
+                value={editing.bank_account || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, bank_account: e.target.value })
+                }
+                className="w-full border rounded-xl px-3 py-2.5 text-sm"
+                placeholder="Bank account"
+              />
+
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-sm font-semibold">Tenant login</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="Login email"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
+                  <input
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Temp password"
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
+                </div>
+                {loginMessage && (
+                  <p
+                    className={`text-xs ${
+                      loginMessage.startsWith("Error")
+                        ? "text-red-600"
+                        : "text-emerald-600"
+                    }`}
+                  >
+                    {loginMessage}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCreateLogin}
+                  disabled={creatingLogin}
+                  className="w-full border border-green-200 text-green-700 py-2 rounded-xl text-sm font-medium"
+                >
+                  {creatingLogin ? "Creating..." : "Create tenant login"}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-2">
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex-1 min-w-[100px] bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="px-4 border border-red-200 text-red-600 rounded-xl text-sm"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setEditing(null)}
+                  className="px-4 border rounded-xl text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>
