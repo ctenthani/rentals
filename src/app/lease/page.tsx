@@ -8,43 +8,38 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
-const DEFAULT_CLAUSES = `RESIDENTIAL TENANCY AGREEMENT – REPUBLIC OF MALAWI
-
-1. PARTIES AND PREMISES
+const DEFAULT_CLAUSES = `1. PARTIES AND PREMISES
 The Landlord lets and the Tenant takes the premises described in this agreement for residential use only.
 
 2. RENT
-The Tenant shall pay the monthly rent stated herein in Malawi Kwacha (MK), on or before the agreed payment day of each month, to the Landlord's nominated bank or mobile money account. Late payment may attract a written demand and, where agreed, a reasonable late fee.
+The Tenant shall pay the monthly rent stated herein in Malawi Kwacha (MK), on or before the agreed payment day of each month, to the Landlord's nominated bank or mobile money account.
 
 3. DEPOSIT
-The Tenant shall pay a security deposit as stated herein. The deposit shall be held by the Landlord and refunded within a reasonable period after move-out, less lawful deductions for unpaid rent, utilities owed by the Tenant, or damage beyond fair wear and tear. An inventory should be agreed at move-in and move-out where practical.
+The Tenant shall pay a security deposit as stated herein. The deposit shall be refunded within a reasonable period after move-out, less lawful deductions for unpaid rent, utilities, or damage beyond fair wear and tear.
 
 4. TERM AND RENEWAL
-The tenancy runs from the start date to the end date stated herein. If the Tenant remains in occupation with the Landlord's consent after the end date without a new written agreement, the tenancy may continue month-to-month on the same terms until terminated by either party with the notice period below.
+The tenancy runs from the start date to the end date stated herein. Occupation after the end date with the Landlord's consent may continue month-to-month on the same terms until terminated with the notice period below.
 
 5. NOTICE AND TERMINATION
-Either party may terminate this agreement by giving written notice of not less than the notice period stated herein (default 30 days), unless a longer period is required by any applicable law or mutual written variation. The Landlord may seek vacant possession for material breach (including non-payment of rent after demand, illegal use, or serious damage) in accordance with applicable law.
+Either party may terminate by written notice of not less than the notice period stated herein (default 30 days). The Landlord may seek vacant possession for material breach including non-payment of rent after demand.
 
 6. USE AND OCCUPATION
-The premises shall be used only as a private dwelling. The Tenant shall not sublet, assign, or part with possession without the Landlord's prior written consent. The Tenant shall not carry on any unlawful activity on the premises.
+The premises shall be used only as a private dwelling. The Tenant shall not sublet or assign without the Landlord's prior written consent.
 
 7. CARE OF PREMISES
-The Tenant shall keep the interior reasonably clean and shall not cause damage beyond fair wear and tear. The Tenant shall report structural defects, water leaks, and electrical hazards promptly. Alterations require the Landlord's written consent.
+The Tenant shall keep the interior reasonably clean and report structural defects, leaks, and electrical hazards promptly. Alterations require written consent.
 
-8. UTILITIES AND OUTGOINGS
-Unless otherwise agreed in writing, the Tenant is responsible for electricity, water, and other metered utilities consumed during the tenancy. The Landlord remains responsible for structural repairs and rates/taxes on the property unless otherwise agreed.
+8. UTILITIES
+Unless otherwise agreed, the Tenant is responsible for electricity, water, and other metered utilities. The Landlord remains responsible for structural repairs unless otherwise agreed.
 
 9. ACCESS
-The Landlord or agent may enter the premises at reasonable times, with reasonable prior notice (except in emergency), to inspect, repair, or show the premises.
+The Landlord or agent may enter at reasonable times with reasonable prior notice (except in emergency) to inspect, repair, or show the premises.
 
-10. DISPUTE RESOLUTION
-The parties shall first attempt to resolve disputes amicably. Nothing in this agreement limits either party's rights under the laws of Malawi.
-
-11. ENTIRE AGREEMENT
+10. ENTIRE AGREEMENT
 This document constitutes the whole agreement. Variations must be in writing and signed or authenticated by both parties.
 
-12. ELECTRONIC SIGNATURES
-The parties agree that signatures applied electronically on this platform may be used to execute this agreement to the extent permitted under applicable Malawian law.`;
+11. ELECTRONIC SIGNATURES
+Signatures applied electronically on this platform (drawn or uploaded) may be used to execute this agreement.`;
 
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -56,36 +51,50 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
-function SignaturePad({
+function SignatureBlock({
   label,
+  value,
   onChange,
 }: {
   label: string;
-  onChange: (dataUrl: string | null) => void;
+  value: string | null;
+  onChange: (v: string | null) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
+  const [mode, setMode] = useState<"draw" | "upload">("draw");
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || mode !== "draw") return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
-  }, []);
+    if (value && value.startsWith("data:image")) {
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      img.src = value;
+    }
+  }, [mode]);
 
   const pos = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
     if ("touches" in e) {
       const t = e.touches[0];
-      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      return {
+        x: (t.clientX - rect.left) * scaleX,
+        y: (t.clientY - rect.top) * scaleY,
+      };
     }
+    const m = e as React.MouseEvent;
     return {
-      x: (e as React.MouseEvent).clientX - rect.left,
-      y: (e as React.MouseEvent).clientY - rect.top,
+      x: (m.clientX - rect.left) * scaleX,
+      y: (m.clientY - rect.top) * scaleY,
     };
   };
 
@@ -114,37 +123,87 @@ function SignaturePad({
   };
 
   const clear = () => {
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d")!;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     onChange(null);
+  };
+
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result));
+    reader.readAsDataURL(file);
   };
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-between items-center">
-        <label className="text-sm font-medium text-slate-700">{label}</label>
-        <button
-          type="button"
-          onClick={clear}
-          className="text-xs text-slate-500 hover:text-slate-800"
-        >
-          Clear
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
+        <span className="text-sm font-semibold text-slate-800">{label}</span>
+        <div className="flex gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setMode("draw")}
+            className={`px-2 py-1 rounded-lg ${
+              mode === "draw" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"
+            }`}
+          >
+            Draw
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("upload")}
+            className={`px-2 py-1 rounded-lg ${
+              mode === "upload" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"
+            }`}
+          >
+            Upload
+          </button>
+          <button type="button" onClick={clear} className="text-slate-500 hover:text-slate-800">
+            Clear
+          </button>
+        </div>
       </div>
-      <canvas
-        ref={canvasRef}
-        width={400}
-        height={140}
-        className="w-full border border-slate-200 rounded-xl bg-white touch-none cursor-crosshair"
-        onMouseDown={start}
-        onMouseMove={move}
-        onMouseUp={end}
-        onMouseLeave={end}
-        onTouchStart={start}
-        onTouchMove={move}
-        onTouchEnd={end}
-      />
+
+      {value && (
+        <img
+          src={value}
+          alt={label}
+          className="max-h-24 border border-slate-200 rounded-lg bg-white"
+        />
+      )}
+
+      <div className="print:hidden">
+        {mode === "draw" ? (
+          <canvas
+            ref={canvasRef}
+            width={400}
+            height={140}
+            className="w-full border border-slate-200 rounded-xl bg-white touch-none cursor-crosshair"
+            onMouseDown={start}
+            onMouseMove={move}
+            onMouseUp={end}
+            onMouseLeave={end}
+            onTouchStart={start}
+            onTouchMove={move}
+            onTouchEnd={end}
+          />
+        ) : (
+          <input
+            type="file"
+            accept="image/*"
+            onChange={onFile}
+            className="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-800 file:font-medium"
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -181,8 +240,6 @@ export default function LeasePage() {
   const [landlordSigner, setLandlordSigner] = useState("");
   const [tenantSigner, setTenantSigner] = useState("");
 
-  const [existingLease, setExistingLease] = useState<any>(null);
-
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
@@ -191,8 +248,6 @@ export default function LeasePage() {
     setTenantId(tid);
 
     async function load() {
-      await supabase.rpc("expire_due_leases");
-
       if (!tid) {
         setError("Missing tenant_id");
         setLoading(false);
@@ -202,10 +257,8 @@ export default function LeasePage() {
       const { data: tenant, error: tErr } = await supabase
         .from("tenants")
         .select(
-          `
-          id, full_name, phone, email, national_id, move_in_date, landlord_id,
-          houses ( name, code, monthly_rent, bank_account )
-        `
+          `id, full_name, phone, email, national_id, move_in_date, landlord_id,
+           houses ( name, code, monthly_rent, bank_account )`
         )
         .eq("id", tid)
         .maybeSingle();
@@ -250,11 +303,10 @@ export default function LeasePage() {
         .maybeSingle();
 
       if (lease) {
-        setExistingLease(lease);
         setStartDate(lease.start_date || startDate);
         setEndDate(lease.end_date || "");
         setMonthlyRent(String(lease.monthly_rent || monthlyRent));
-        setDeposit(String(lease.deposit_amount || "0"));
+        setDeposit(String(lease.deposit_amount ?? "0"));
         setPaymentDay(String(lease.payment_day || "1"));
         setNoticeDays(String(lease.notice_period_days || "30"));
         if (lease.terms) setTerms(lease.terms);
@@ -312,14 +364,12 @@ export default function LeasePage() {
       return;
     }
 
-    setSuccess(
-      `Lease saved (${data?.status || "active"}). ID: ${String(data?.lease_id || "").slice(0, 8)}`
-    );
+    setSuccess("Lease saved successfully");
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center">
         <p className="text-slate-500">Loading lease...</p>
       </div>
     );
@@ -328,7 +378,7 @@ export default function LeasePage() {
   if (error && !tenantName) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-4">
-        <p className="text-red-600">{error}</p>
+        <p className="text-red-600 text-sm">{error}</p>
         <Link href="/dashboard" className="text-green-700 text-sm">
           ← Dashboard
         </Link>
@@ -336,14 +386,9 @@ export default function LeasePage() {
     );
   }
 
-  const status = existingLease?.status || "draft";
-  const isExpired =
-    status === "expired" ||
-    (endDate && new Date(endDate) < new Date(new Date().toDateString()));
-
   return (
     <div className="min-h-screen bg-white">
-      <div className="max-w-3xl mx-auto px-4 py-6 print:py-2">
+      <div className="max-w-3xl mx-auto px-4 py-6 print:py-2 print:max-w-none">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6 print:hidden">
           <Link href="/dashboard" className="text-sm text-slate-600">
             ← Dashboard
@@ -378,22 +423,15 @@ export default function LeasePage() {
           </p>
         )}
 
-        <div className="border-2 border-slate-800 rounded-lg p-6 sm:p-8">
+        {/* Full printable lease document */}
+        <article
+          id="lease-document"
+          className="border-2 border-slate-800 rounded-lg p-6 sm:p-8 print:border print:rounded-none print:p-0"
+        >
           <div className="text-center mb-6">
             <h1 className="text-xl font-bold tracking-wide">
               RESIDENTIAL TENANCY AGREEMENT
             </h1>
-            <p className="text-sm text-slate-600 mt-1">Republic of Malawi</p>
-            <p className="text-xs mt-2">
-              Status:{" "}
-              <span
-                className={`font-semibold uppercase ${
-                  isExpired ? "text-red-600" : "text-emerald-700"
-                }`}
-              >
-                {isExpired ? "expired" : status}
-              </span>
-            </p>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4 text-sm mb-6">
@@ -457,7 +495,6 @@ export default function LeasePage() {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                required
                 className="w-full border rounded-xl px-3 py-2 text-sm"
               />
             </div>
@@ -496,7 +533,7 @@ export default function LeasePage() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Payment day of month
+                Payment day
               </label>
               <input
                 type="number"
@@ -509,7 +546,7 @@ export default function LeasePage() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Notice period (days)
+                Notice (days)
               </label>
               <input
                 type="number"
@@ -520,117 +557,93 @@ export default function LeasePage() {
             </div>
           </div>
 
-          {/* Print summary */}
-          <div className="hidden print:grid grid-cols-2 gap-2 text-sm mb-6">
+          {/* Print-only summary of key terms */}
+          <div className="hidden print:block text-sm mb-6 space-y-1">
             <p>
-              <span className="text-slate-500">National ID:</span>{" "}
-              {nationalId || "—"}
+              <strong>National ID:</strong> {nationalId || "—"}
             </p>
             <p>
-              <span className="text-slate-500">Move-in:</span> {moveIn || "—"}
+              <strong>Move-in:</strong> {moveIn || "—"}
             </p>
             <p>
-              <span className="text-slate-500">Start:</span> {startDate}
+              <strong>Lease period:</strong> {startDate} to {endDate || "open"}
             </p>
             <p>
-              <span className="text-slate-500">End:</span> {endDate || "Open"}
+              <strong>Monthly rent:</strong> {formatMK(Number(monthlyRent || 0))}
             </p>
             <p>
-              <span className="text-slate-500">Rent:</span>{" "}
-              {formatMK(Number(monthlyRent || 0))}
+              <strong>Deposit:</strong> {formatMK(Number(deposit || 0))}
             </p>
             <p>
-              <span className="text-slate-500">Deposit:</span>{" "}
-              {formatMK(Number(deposit || 0))}
-            </p>
-            <p>
-              <span className="text-slate-500">Payment day:</span> {paymentDay}
-            </p>
-            <p>
-              <span className="text-slate-500">Notice:</span> {noticeDays} days
+              <strong>Payment day:</strong> {paymentDay} ·{" "}
+              <strong>Notice:</strong> {noticeDays} days
             </p>
           </div>
 
-          <div className="mb-6">
+          <div className="mb-8">
             <h2 className="text-sm font-bold uppercase tracking-wide mb-2">
               Terms and conditions
             </h2>
             <textarea
               value={terms}
               onChange={(e) => setTerms(e.target.value)}
-              rows={16}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs leading-relaxed font-mono print:border-0 print:p-0"
+              rows={14}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs leading-relaxed print:border-0 print:p-0 print:text-sm"
             />
           </div>
 
           <div className="grid sm:grid-cols-2 gap-8 mt-8">
-            <div className="space-y-3">
-              <p className="text-sm font-semibold">Landlord signature</p>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Landlord</p>
               <input
                 value={landlordSigner}
                 onChange={(e) => setLandlordSigner(e.target.value)}
                 placeholder="Full name"
                 className="w-full border rounded-xl px-3 py-2 text-sm print:hidden"
               />
-              {landlordSig ? (
-                <img
-                  src={landlordSig}
-                  alt="Landlord signature"
-                  className="border rounded-xl max-h-28 bg-white"
-                />
-              ) : (
-                <div className="print:hidden">
-                  <SignaturePad
-                    label="Draw signature"
-                    onChange={setLandlordSig}
-                  />
-                </div>
-              )}
-              <p className="text-xs text-slate-500">
-                Date:{" "}
-                {existingLease?.landlord_signed_at
-                  ? new Date(existingLease.landlord_signed_at).toLocaleString()
-                  : "—"}
-              </p>
+              <p className="hidden print:block text-sm">{landlordSigner}</p>
+              <SignatureBlock
+                label="Signature"
+                value={landlordSig}
+                onChange={setLandlordSig}
+              />
             </div>
-
-            <div className="space-y-3">
-              <p className="text-sm font-semibold">Tenant signature</p>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Tenant</p>
               <input
                 value={tenantSigner}
                 onChange={(e) => setTenantSigner(e.target.value)}
                 placeholder="Full name"
                 className="w-full border rounded-xl px-3 py-2 text-sm print:hidden"
               />
-              {tenantSig ? (
-                <img
-                  src={tenantSig}
-                  alt="Tenant signature"
-                  className="border rounded-xl max-h-28 bg-white"
-                />
-              ) : (
-                <div className="print:hidden">
-                  <SignaturePad
-                    label="Draw signature"
-                    onChange={setTenantSig}
-                  />
-                </div>
-              )}
-              <p className="text-xs text-slate-500">
-                Date:{" "}
-                {existingLease?.tenant_signed_at
-                  ? new Date(existingLease.tenant_signed_at).toLocaleString()
-                  : "—"}
-              </p>
+              <p className="hidden print:block text-sm">{tenantSigner}</p>
+              <SignatureBlock
+                label="Signature"
+                value={tenantSig}
+                onChange={setTenantSig}
+              />
             </div>
           </div>
-
-          <p className="text-[10px] text-slate-400 mt-8 text-center">
-            Template for private residential tenancy in Malawi. Not formal legal
-            advice. Parties should seek independent advice where appropriate.
-          </p>
-        </div>
+        </article>
       </div>
+
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #lease-document,
+          #lease-document * {
+            visibility: visible;
+          }
+          #lease-document {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+        }
+      `}</style>
     </div>
   );
 }
