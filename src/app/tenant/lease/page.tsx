@@ -9,15 +9,26 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
+const LANDLORD_BUSINESS_DEFAULT = "Chifundo and Wezzie";
+const LANDLORD_NAME_DEFAULT = "Chifundo and Wezzie Tenthani";
+
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
     style: "currency",
     currency: "MWK",
     minimumFractionDigits: 0,
-  }).format(amount).replace("MWK", "MK");
+  })
+    .format(amount)
+    .replace("MWK", "MK");
 }
 
-function SignaturePad({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+function SignaturePad({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [mode, setMode] = useState<"draw" | "upload">("draw");
@@ -39,10 +50,16 @@ function SignaturePad({ value, onChange }: { value: string | null; onChange: (v:
     const scaleY = canvas.height / rect.height;
     if ("touches" in e) {
       const t = e.touches[0];
-      return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
+      return {
+        x: (t.clientX - rect.left) * scaleX,
+        y: (t.clientY - rect.top) * scaleY,
+      };
     }
     const m = e as React.MouseEvent;
-    return { x: (m.clientX - rect.left) * scaleX, y: (m.clientY - rect.top) * scaleY };
+    return {
+      x: (m.clientX - rect.left) * scaleX,
+      y: (m.clientY - rect.top) * scaleY,
+    };
   };
 
   const start = (e: React.MouseEvent | React.TouchEvent) => {
@@ -70,7 +87,8 @@ function SignaturePad({ value, onChange }: { value: string | null; onChange: (v:
 
   const clear = () => {
     const canvas = canvasRef.current;
-    if (canvas) canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas)
+      canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height);
     onChange(null);
   };
 
@@ -85,18 +103,59 @@ function SignaturePad({ value, onChange }: { value: string | null; onChange: (v:
   return (
     <div className="space-y-2">
       <div className="flex gap-2 text-xs no-print">
-        <button type="button" onClick={() => setMode("draw")} className={`px-2 py-1 rounded-lg ${mode === "draw" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"}`}>Draw</button>
-        <button type="button" onClick={() => setMode("upload")} className={`px-2 py-1 rounded-lg ${mode === "upload" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"}`}>Upload</button>
-        <button type="button" onClick={clear} className="text-slate-500">Clear</button>
+        <button
+          type="button"
+          onClick={() => setMode("draw")}
+          className={`px-2 py-1 rounded-lg ${
+            mode === "draw" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"
+          }`}
+        >
+          Draw
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("upload")}
+          className={`px-2 py-1 rounded-lg ${
+            mode === "upload"
+              ? "bg-emerald-100 text-emerald-800"
+              : "text-slate-500"
+          }`}
+        >
+          Upload
+        </button>
+        <button type="button" onClick={clear} className="text-slate-500">
+          Clear
+        </button>
       </div>
-      {value && <img src={value} alt="Signature" className="max-h-20 border rounded bg-white" />}
+      {value && (
+        <img
+          src={value}
+          alt="Signature"
+          className="max-h-20 border rounded bg-white"
+        />
+      )}
       <div className="no-print">
         {mode === "draw" ? (
-          <canvas ref={canvasRef} width={400} height={120} className="w-full border rounded-xl bg-white touch-none cursor-crosshair"
-            onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
-            onTouchStart={start} onTouchMove={move} onTouchEnd={end} />
+          <canvas
+            ref={canvasRef}
+            width={400}
+            height={120}
+            className="w-full border rounded-xl bg-white touch-none cursor-crosshair"
+            onMouseDown={start}
+            onMouseMove={move}
+            onMouseUp={end}
+            onMouseLeave={end}
+            onTouchStart={start}
+            onTouchMove={move}
+            onTouchEnd={end}
+          />
         ) : (
-          <input type="file" accept="image/*" onChange={onFile} className="block w-full text-sm" />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={onFile}
+            className="block w-full text-sm"
+          />
         )}
       </div>
     </div>
@@ -109,29 +168,48 @@ export default function TenantLeasePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lease, setLease] = useState<any>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+
   const [tenantName, setTenantName] = useState("");
   const [phone, setPhone] = useState("");
-  const [nationalId, setNationalId] = useState("");
   const [houseName, setHouseName] = useState("");
   const [houseCode, setHouseCode] = useState("");
   const [bankAccount, setBankAccount] = useState("");
-  const [landlordBusiness, setLandlordBusiness] = useState("");
-  const [landlordName, setLandlordName] = useState("");
+  const [landlordBusiness, setLandlordBusiness] = useState(
+    LANDLORD_BUSINESS_DEFAULT
+  );
+  const [landlordName, setLandlordName] = useState(LANDLORD_NAME_DEFAULT);
   const [monthlyRent, setMonthlyRent] = useState(0);
+
   const [tenantSig, setTenantSig] = useState<string | null>(null);
   const [tenantSigner, setTenantSigner] = useState("");
+
+  // ID document (mandatory)
+  const [idType, setIdType] = useState<"national_id" | "passport">("national_id");
+  const [idNumber, setIdNumber] = useState("");
+  const [idFile, setIdFile] = useState<File | null>(null);
+  const [idPreview, setIdPreview] = useState<string | null>(null);
+  const [idDocUrl, setIdDocUrl] = useState<string | null>(null);
 
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
     async function load() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push("/auth/login"); return; }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth/login");
+        return;
+      }
 
       const { data: tenant, error: tErr } = await supabase
         .from("tenants")
-        .select(`id, full_name, phone, national_id, landlord_id, houses ( name, code, monthly_rent, bank_account )`)
+        .select(
+          `id, full_name, phone, national_id, id_document_url, landlord_id,
+           houses ( name, code, monthly_rent, bank_account )`
+        )
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
 
@@ -141,20 +219,36 @@ export default function TenantLeasePage() {
         return;
       }
 
-      const house = Array.isArray(tenant.houses) ? tenant.houses[0] : tenant.houses;
+      const house = Array.isArray(tenant.houses)
+        ? tenant.houses[0]
+        : tenant.houses;
+
+      setTenantId(tenant.id);
       setTenantName(tenant.full_name || "");
       setPhone(tenant.phone || "");
-      setNationalId(tenant.national_id || "");
       setHouseName(house?.name || "");
       setHouseCode(house?.code || "");
       setBankAccount(house?.bank_account || "");
       setMonthlyRent(Number(house?.monthly_rent || 0));
       setTenantSigner(tenant.full_name || "");
+      setIdNumber(tenant.national_id || "");
+      if (tenant.id_document_url) {
+        setIdDocUrl(tenant.id_document_url);
+        setIdPreview(tenant.id_document_url);
+      }
+
+      // Landlord name — always show defaults, then override from DB if present
+      setLandlordBusiness(LANDLORD_BUSINESS_DEFAULT);
+      setLandlordName(LANDLORD_NAME_DEFAULT);
 
       if (tenant.landlord_id) {
-        const { data: ll } = await supabase.from("landlords").select("full_name, business_name").eq("id", tenant.landlord_id).maybeSingle();
-        setLandlordName(ll?.full_name || "");
-        setLandlordBusiness(ll?.business_name || "");
+        const { data: ll } = await supabase
+          .from("landlords")
+          .select("full_name, business_name")
+          .eq("id", tenant.landlord_id)
+          .maybeSingle();
+        if (ll?.business_name) setLandlordBusiness(ll.business_name);
+        if (ll?.full_name) setLandlordName(ll.full_name);
       }
 
       const { data: leaseRow } = await supabase
@@ -173,34 +267,129 @@ export default function TenantLeasePage() {
 
       setLease(leaseRow);
       if (leaseRow.tenant_signature) setTenantSig(leaseRow.tenant_signature);
-      if (leaseRow.tenant_signer_name) setTenantSigner(leaseRow.tenant_signer_name);
+      if (leaseRow.tenant_signer_name)
+        setTenantSigner(leaseRow.tenant_signer_name);
+      if (leaseRow.landlord_signer_name)
+        setLandlordName(leaseRow.landlord_signer_name);
       if (leaseRow.monthly_rent) setMonthlyRent(Number(leaseRow.monthly_rent));
       setLoading(false);
     }
     load();
   }, [router]);
 
+  const onIdFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
+      setError("Upload a photo or PDF of your National ID or passport");
+      return;
+    }
+    setIdFile(file);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = () => setIdPreview(String(reader.result));
+      reader.readAsDataURL(file);
+    } else {
+      setIdPreview(null);
+    }
+  };
+
   const handleSaveSignature = async () => {
-    if (!tenantSig) { setError("Please draw or upload your signature first"); return; }
-    setSaving(true); setError(null); setSuccess(null);
+    if (!tenantId) return;
+
+    if (!idDocUrl && !idFile) {
+      setError("Upload a copy of your National ID or passport (required)");
+      return;
+    }
+    if (!idNumber.trim()) {
+      setError("Enter your ID / passport number");
+      return;
+    }
+    if (!tenantSig) {
+      setError("Please draw or upload your signature");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    let uploadedUrl = idDocUrl;
+
+    if (idFile) {
+      const path = `${tenantId}/${Date.now()}-${idFile.name.replace(
+        /[^a-zA-Z0-9._-]/g,
+        "_"
+      )}`;
+      const { error: upErr } = await supabase.storage
+        .from("tenant-ids")
+        .upload(path, idFile, { upsert: true });
+      if (upErr) {
+        setSaving(false);
+        setError(upErr.message);
+        return;
+      }
+      const { data: pub } = supabase.storage
+        .from("tenant-ids")
+        .getPublicUrl(path);
+      uploadedUrl = pub.publicUrl;
+      setIdDocUrl(uploadedUrl);
+    }
+
+    // Save ID on tenant record
+    await supabase
+      .from("tenants")
+      .update({
+        national_id: idNumber.trim(),
+        id_document_url: uploadedUrl,
+        id_document_type: idType,
+      })
+      .eq("id", tenantId);
+
     const { data, error: rpcError } = await supabase.rpc("tenant_sign_lease", {
       p_tenant_signature: tenantSig,
       p_tenant_signer_name: tenantSigner || tenantName,
     });
+
     setSaving(false);
-    if (rpcError) { setError(rpcError.message); return; }
-    if (data?.success === false) { setError(data.error || "Could not save"); return; }
-    setSuccess("Signature saved");
-    setLease((prev: any) => prev ? { ...prev, tenant_signature: tenantSig, tenant_signer_name: tenantSigner, tenant_signed_at: new Date().toISOString() } : prev);
+
+    if (rpcError) {
+      setError(rpcError.message);
+      return;
+    }
+    if (data?.success === false) {
+      setError(data.error || "Could not save");
+      return;
+    }
+
+    setSuccess("ID and signature saved");
+    setLease((prev: any) =>
+      prev
+        ? {
+            ...prev,
+            tenant_signature: tenantSig,
+            tenant_signer_name: tenantSigner,
+            tenant_signed_at: new Date().toISOString(),
+          }
+        : prev
+    );
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Loading lease...</p></div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-slate-500">Loading lease...</p>
+      </div>
+    );
+  }
 
   if (error && !lease) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-4">
         <p className="text-red-600 text-sm text-center">{error}</p>
-        <Link href="/tenant" className="text-green-700 text-sm font-medium">← Tenant portal</Link>
+        <Link href="/tenant" className="text-green-700 text-sm font-medium">
+          ← Tenant portal
+        </Link>
       </div>
     );
   }
@@ -209,80 +398,243 @@ export default function TenantLeasePage() {
     <div className="min-h-screen bg-white">
       <div className="max-w-3xl mx-auto px-4 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6 no-print">
-          <Link href="/tenant" className="text-sm text-slate-600">← Tenant portal</Link>
+          <Link href="/tenant" className="text-sm text-slate-600">
+            ← Tenant portal
+          </Link>
           <div className="flex gap-2">
-            <button type="button" onClick={() => window.print()} className="border px-4 py-2 rounded-xl text-sm font-medium">Download / Print PDF</button>
-            <button type="button" onClick={handleSaveSignature} disabled={saving} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50">
-              {saving ? "Saving..." : "Save my signature"}
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="border px-4 py-2 rounded-xl text-sm font-medium"
+            >
+              Download / Print PDF
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveSignature}
+              disabled={saving}
+              className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save ID & signature"}
             </button>
           </div>
         </div>
-        {error && <p className="mb-4 text-sm text-red-600 bg-red-50 p-3 rounded-xl no-print">{error}</p>}
-        {success && <p className="mb-4 text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl no-print">{success}</p>}
 
-        <article id="lease-document" className="border-2 border-slate-800 p-6 sm:p-8">
-          <h1 className="text-xl font-bold text-center mb-6">RESIDENTIAL TENANCY AGREEMENT</h1>
+        {error && (
+          <p className="mb-4 text-sm text-red-600 bg-red-50 p-3 rounded-xl no-print">
+            {error}
+          </p>
+        )}
+        {success && (
+          <p className="mb-4 text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl no-print">
+            {success}
+          </p>
+        )}
+
+        {/* Mandatory ID upload — tenant side */}
+        <div className="mb-6 border border-amber-200 bg-amber-50 rounded-2xl p-4 space-y-3 no-print">
+          <h2 className="font-bold text-sm text-amber-900">
+            Identification (required)
+          </h2>
+          <p className="text-xs text-amber-800">
+            Upload a clear photo or scan of your National ID or passport before
+            signing.
+          </p>
+          <div className="flex gap-3 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={idType === "national_id"}
+                onChange={() => setIdType("national_id")}
+              />
+              National ID
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={idType === "passport"}
+                onChange={() => setIdType("passport")}
+              />
+              Passport
+            </label>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600">
+              ID / Passport number
+            </label>
+            <input
+              value={idNumber}
+              onChange={(e) => setIdNumber(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm mt-1 bg-white"
+              placeholder="Enter number as on the document"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600">
+              Upload document (image or PDF)
+            </label>
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={onIdFile}
+              className="block w-full text-sm mt-1"
+            />
+          </div>
+          {idPreview && (
+            <img
+              src={idPreview}
+              alt="ID preview"
+              className="max-h-40 rounded-lg border bg-white"
+            />
+          )}
+          {idDocUrl && !idPreview && (
+            <a
+              href={idDocUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-emerald-700 underline"
+            >
+              View uploaded document
+            </a>
+          )}
+        </div>
+
+        <article
+          id="lease-document"
+          className="border-2 border-slate-800 p-6 sm:p-8"
+        >
+          <h1 className="text-xl font-bold text-center mb-6">
+            RESIDENTIAL TENANCY AGREEMENT
+          </h1>
+
           <div className="grid sm:grid-cols-2 gap-4 text-sm mb-4">
             <div>
-              <p className="text-xs uppercase text-slate-500 font-semibold">Landlord</p>
-              <p className="font-medium">{landlordBusiness || landlordName}</p>
-              <p className="text-slate-600">{landlordName}</p>
+              <p className="text-xs uppercase text-slate-500 font-semibold">
+                Landlord
+              </p>
+              <p className="font-medium">
+                {landlordBusiness || LANDLORD_BUSINESS_DEFAULT}
+              </p>
+              <p className="text-slate-700">
+                {landlordName || LANDLORD_NAME_DEFAULT}
+              </p>
             </div>
             <div>
-              <p className="text-xs uppercase text-slate-500 font-semibold">Tenant</p>
+              <p className="text-xs uppercase text-slate-500 font-semibold">
+                Tenant
+              </p>
               <p className="font-medium">{tenantName}</p>
               <p className="text-slate-600">{phone}</p>
             </div>
             <div>
-              <p className="text-xs uppercase text-slate-500 font-semibold">Premises</p>
-              <p className="font-medium">{houseName} ({houseCode})</p>
+              <p className="text-xs uppercase text-slate-500 font-semibold">
+                Premises
+              </p>
+              <p className="font-medium">
+                {houseName} ({houseCode})
+              </p>
             </div>
             <div>
-              <p className="text-xs uppercase text-slate-500 font-semibold">Rent payment account</p>
+              <p className="text-xs uppercase text-slate-500 font-semibold">
+                Rent payment account
+              </p>
               <p className="font-medium">{bankAccount || "—"}</p>
             </div>
           </div>
+
           <div className="text-sm space-y-1 mb-4">
-            <p><strong>National ID:</strong> {nationalId || "—"}</p>
-            <p><strong>Lease period:</strong> {lease?.start_date || "—"} to {lease?.end_date || "open"}</p>
-            <p><strong>Monthly rent:</strong> {formatMK(Number(lease?.monthly_rent || monthlyRent))}</p>
-            <p><strong>Deposit:</strong> {formatMK(Number(lease?.deposit_amount || 0))}</p>
-            <p><strong>Payment day:</strong> {lease?.payment_day || 1} · <strong>Notice:</strong> {lease?.notice_period_days || 30} days</p>
+            <p>
+              <strong>ID type:</strong>{" "}
+              {idType === "passport" ? "Passport" : "National ID"}
+            </p>
+            <p>
+              <strong>ID / Passport number:</strong> {idNumber || "—"}
+            </p>
+            <p>
+              <strong>Lease period:</strong> {lease?.start_date || "—"} to{" "}
+              {lease?.end_date || "open"}
+            </p>
+            <p>
+              <strong>Monthly rent:</strong>{" "}
+              {formatMK(Number(lease?.monthly_rent || monthlyRent))}
+            </p>
+            <p>
+              <strong>Deposit:</strong>{" "}
+              {formatMK(Number(lease?.deposit_amount || 0))}
+            </p>
           </div>
-          <h2 className="text-sm font-bold uppercase mb-2">Terms and conditions</h2>
-          <div className="text-sm leading-relaxed whitespace-pre-wrap mb-8">{lease?.terms || "No terms saved yet."}</div>
+
+          <h2 className="text-sm font-bold uppercase mb-2">
+            Terms and conditions
+          </h2>
+          <div className="text-sm leading-relaxed whitespace-pre-wrap mb-8">
+            {lease?.terms || "No terms saved yet."}
+          </div>
+
           <div className="grid sm:grid-cols-2 gap-8">
             <div className="space-y-2">
               <p className="text-sm font-semibold">Landlord</p>
-              <p className="text-sm">{lease?.landlord_signer_name || landlordName}</p>
+              <p className="text-sm">
+                {lease?.landlord_signer_name ||
+                  landlordName ||
+                  LANDLORD_NAME_DEFAULT}
+              </p>
               {lease?.landlord_signature ? (
-                <img src={lease.landlord_signature} alt="Landlord" className="max-h-20 border rounded bg-white" />
+                <img
+                  src={lease.landlord_signature}
+                  alt="Landlord"
+                  className="max-h-20 border rounded bg-white"
+                />
               ) : (
-                <p className="text-xs text-slate-400">Awaiting landlord signature</p>
+                <p className="text-xs text-slate-400">
+                  Awaiting landlord signature
+                </p>
               )}
             </div>
             <div className="space-y-2">
               <p className="text-sm font-semibold">Tenant</p>
-              <input value={tenantSigner} onChange={(e) => setTenantSigner(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm no-print" />
+              <input
+                value={tenantSigner}
+                onChange={(e) => setTenantSigner(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm no-print"
+              />
               <p className="text-sm only-print">{tenantSigner}</p>
               <div className="no-print">
                 <SignaturePad value={tenantSig} onChange={setTenantSig} />
               </div>
               {(tenantSig || lease?.tenant_signature) && (
-                <img src={tenantSig || lease.tenant_signature} alt="Tenant" className="max-h-20 border rounded bg-white only-print" />
+                <img
+                  src={tenantSig || lease.tenant_signature}
+                  alt="Tenant"
+                  className="max-h-20 border rounded bg-white only-print"
+                />
               )}
             </div>
           </div>
         </article>
       </div>
+
       <style jsx global>{`
-        .only-print { display: none; }
+        .only-print {
+          display: none;
+        }
         @media print {
-          .no-print { display: none !important; }
-          .only-print { display: block !important; }
-          body { background: white; }
-          #lease-document { border: 1px solid #000; }
-          @page { margin: 12mm; size: A4; }
+          .no-print {
+            display: none !important;
+          }
+          .only-print {
+            display: block !important;
+          }
+          body {
+            background: white;
+          }
+          #lease-document {
+            border: 1px solid #000;
+          }
+          @page {
+            margin: 12mm;
+            size: A4;
+          }
         }
       `}</style>
     </div>
