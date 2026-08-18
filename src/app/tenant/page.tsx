@@ -38,6 +38,13 @@ function getPaidMonths(nextDueDate: string, monthsInAdvance: number): string {
   return months.join(", ");
 }
 
+<Link
+  href="/tenant/lease"
+  className="block w-full text-center bg-white border border-emerald-200 text-emerald-800 font-semibold py-3 rounded-xl"
+>
+  View / sign lease
+</Link>
+
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     paid: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20",
