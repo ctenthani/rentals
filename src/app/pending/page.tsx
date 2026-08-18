@@ -140,7 +140,6 @@ export default function PendingPage() {
     }
 
     setMsg("Payment confirmed");
-
     if (data?.payment_id) {
       window.open(`/receipt?id=${data.payment_id}`, "_blank");
     }
@@ -153,10 +152,11 @@ export default function PendingPage() {
           to: tenantInfo.email,
           subject: "Payment confirmed – Rentozi",
           html: `<p>Hello ${tenantInfo.name},</p>
-<p>Your rent payment has been confirmed.</p>
-<p><a href="https://rentozi.netlify.app/receipt?id=${data.payment_id}">View receipt</a></p>
-<p>Thank you.<br/>Rentozi Rentals</p>`,
-          text: `Hello ${tenantInfo.name}, your payment was confirmed. Receipt: https://rentozi.netlify.app/receipt?id=${data.payment_id}`,
+<p>Thank you for your payment. It has been received and confirmed.</p>
+<p>Amount: <strong>${formatMK(Number(row?.amount || 0))}</strong></p>
+<p><a href="https://rentozi.netlify.app/receipt?id=${data.payment_id}">View / print your receipt</a></p>
+<p>We appreciate you as a tenant.<br/><br/>Warm regards,<br/><strong>Chifundo and Wezzie Tenthani</strong><br/>Rentozi Rentals</p>`,
+          text: `Thank you ${tenantInfo.name}. Payment confirmed. Receipt: https://rentozi.netlify.app/receipt?id=${data.payment_id}`,
         },
       });
     }
@@ -186,7 +186,6 @@ export default function PendingPage() {
           )}
         </div>
       </header>
-
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-3">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>
@@ -196,7 +195,6 @@ export default function PendingPage() {
             {msg}
           </p>
         )}
-
         {loading ? (
           <p className="text-slate-500 text-sm">Loading...</p>
         ) : items.length === 0 ? (
@@ -227,9 +225,6 @@ export default function PendingPage() {
                   <p className="text-xs">
                     Txn ID: <strong>{s.transaction_id}</strong>
                   </p>
-                )}
-                {s.notes && (
-                  <p className="text-xs text-slate-400">{s.notes}</p>
                 )}
                 {s.proof_url && (
                   <a href={s.proof_url} target="_blank" rel="noreferrer">
