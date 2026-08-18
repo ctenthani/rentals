@@ -9,191 +9,148 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
-function formatMK(amount: number) {
-  return new Intl.NumberFormat("en-MW", {
-    style: "currency",
-    currency: "MWK",
-    minimumFractionDigits: 0,
-  })
-    .format(amount)
-    .replace("MWK", "MK");
+function formatMK(n: number) {
+  return new Intl.NumberFormat("en-MW", { style: "currency", currency: "MWK", minimumFractionDigits: 0 })
+    .format(n).replace("MWK", "MK");
 }
 
-export default function PendingPaymentsPage() {
-  const [submissions, setSubmissions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const router = useRouter();
+type Submission = {
+  id: string;
+  amount: number;
+  method: string;
+  reference_used: string | null;
+  paid_date: string;
+  status: string;
+  created_at: string;
+  transaction_id: string | null;
+  proof_url: string | null;
+  notes: string | null;
+  tenants: { full_name: string; email: string | null; houses: { name: string; code: string } | { name: string; code: string }[] } | null;
+};
 
+export default function PendingPage() {
+  const [items, setItems] = useState<Submission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  useEffect(() => {
-    async function load() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  async function load() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { router.push("/auth/login"); return; }
 
-      if (!session) {
-        router.push("/auth/login");
-        return;
-      }
-
-      await fetchSubmissions();
-      setLoading(false);
+    let { data: landlord } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+    if (!landlord) {
+      const { data: m } = await supabase.from("landlord_members").select("landlord_id").eq("auth_user_id", session.user.id).maybeSingle();
+      if (m) landlord = { id: m.landlord_id };
     }
+    if (!landlord) { setError("No landlord profile"); setLoading(false); return; }
 
-    load();
-  }, [router]);
+    const { data: tenants } = await supabase.from("tenants").select("id").eq("landlord_id", landlord.id);
+    const ids = (tenants || []).map((t) => t.id);
+    if (!ids.length) { setItems([]); setLoading(false); return; }
 
-  async function fetchSubmissions() {
-    const { data, error } = await supabase
+    const { data, error: qErr } = await supabase
       .from("payment_submissions")
-      .select(
-        `
-        id,
-        amount,
-        method,
-        reference_used,
-        paid_date,
-        status,
-        created_at,
-        tenants (
-          full_name,
-          houses (
-            name,
-            code
-          )
-        )
-      `
-      )
+      .select(`id, amount, method, reference_used, paid_date, status, created_at, transaction_id, proof_url, notes,
+        tenants ( full_name, email, houses ( name, code ) )`)
+      .in("tenant_id", ids)
       .eq("status", "pending")
       .order("created_at", { ascending: false });
 
-    if (!error) {
-      setSubmissions(data || []);
-    }
+    if (qErr) setError(qErr.message);
+    else setItems((data as any) || []);
+    setLoading(false);
   }
 
-  const handleConfirm = async (submission: any) => {
-    setProcessing(submission.id);
-    setMessage(null);
+  useEffect(() => { load(); }, [router]);
 
-    const { error } = await supabase.rpc("confirm_payment_submission", {
-      p_submission_id: submission.id,
-      p_confirmed_amount: submission.amount,
-      p_landlord_notes: "Confirmed via portal",
-    });
-
-    if (error) {
-      setMessage("Error: " + error.message);
-      setProcessing(null);
-      return;
+  const confirm = async (id: string) => {
+    setBusy(id); setError(null); setMsg(null);
+    const { data, error: rpcErr } = await supabase.rpc("confirm_payment_submission", { p_submission_id: id });
+    setBusy(null);
+    if (rpcErr) { setError(rpcErr.message); return; }
+    if (data?.success === false) { setError(data.error || "Confirm failed"); return; }
+    setMsg("Payment confirmed");
+    if (data?.payment_id) {
+      window.open(`/receipt?id=${data.payment_id}`, "_blank");
     }
-
-    setMessage(
-      `Payment of ${formatMK(submission.amount)} confirmed successfully.`
-    );
-    await fetchSubmissions();
-    setProcessing(null);
+    await load();
   };
 
-  const handleReject = async (id: string) => {
-    setProcessing(id);
-
-    const { error } = await supabase
-      .from("payment_submissions")
-      .update({ status: "rejected" })
-      .eq("id", id);
-
-    if (error) {
-      setMessage("Error: " + error.message);
-    } else {
-      setMessage("Payment rejected.");
-      await fetchSubmissions();
-    }
-
-    setProcessing(null);
+  const reject = async (id: string) => {
+    setBusy(id);
+    await supabase.rpc("reject_payment_submission", { p_submission_id: id });
+    setBusy(null);
+    await load();
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-500">Loading...</p>
-      </div>
-    );
-  }
+  const tenantOf = (s: Submission) => {
+    const t = s.tenants;
+    if (!t) return { name: "—", house: "—", email: null as string | null };
+    const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+    return { name: t.full_name, house: h ? `${h.name} (${h.code})` : "—", email: t.email };
+  };
 
   return (
-    <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="text-slate-600">
-              ← Dashboard
-            </Link>
-            <h1 className="text-2xl font-bold">Pending Payments</h1>
-          </div>
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-white border-b">
+        <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-4">
+          <Link href="/dashboard" className="text-sm text-slate-600">← Dashboard</Link>
+          <h1 className="font-bold">Pending payments</h1>
+          {items.length > 0 && (
+            <span className="ml-auto text-xs font-bold bg-amber-100 text-amber-800 px-2 py-1 rounded-full animate-pulse">
+              {items.length} action
+            </span>
+          )}
         </div>
-
-        {message && (
-          <div className="mb-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm">
-            {message}
-          </div>
-        )}
-
-        {submissions.length === 0 ? (
-          <div className="bg-white rounded-xl border p-8 text-center text-slate-500">
-            No pending payments
-          </div>
+      </header>
+      <main className="max-w-3xl mx-auto px-4 py-6 space-y-3">
+        {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+        {msg && <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>}
+        {loading ? (
+          <p className="text-slate-500 text-sm">Loading...</p>
+        ) : items.length === 0 ? (
+          <p className="text-slate-500 text-sm text-center py-12">No pending submissions</p>
         ) : (
-          <div className="space-y-4">
-            {submissions.map((sub) => {
-              const tenantName = sub.tenants?.full_name || "Unknown";
-              const house =
-                Array.isArray(sub.tenants?.houses)
-                  ? sub.tenants.houses[0]
-                  : sub.tenants?.houses;
-              const houseName = house?.name || "—";
-
-              return (
-                <div
-                  key={sub.id}
-                  className="bg-white rounded-xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                >
+          items.map((s) => {
+            const t = tenantOf(s);
+            return (
+              <div key={s.id} className="bg-white border rounded-2xl p-4 shadow-sm space-y-2">
+                <div className="flex justify-between gap-2">
                   <div>
-                    <p className="font-medium">{tenantName}</p>
-                    <p className="text-sm text-slate-500">{houseName}</p>
-                    <p className="text-lg font-bold mt-1">
-                      {formatMK(Number(sub.amount))}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {sub.method} • {sub.paid_date} • Ref: {sub.reference_used}
-                    </p>
+                    <p className="font-semibold">{t.name}</p>
+                    <p className="text-xs text-slate-500">{t.house}</p>
                   </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleConfirm(sub)}
-                      disabled={processing === sub.id}
-                      className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm font-medium px-4 py-2 rounded-lg"
-                    >
-                      {processing === sub.id ? "..." : "Confirm"}
-                    </button>
-                    <button
-                      onClick={() => handleReject(sub.id)}
-                      disabled={processing === sub.id}
-                      className="border text-sm px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-50"
-                    >
-                      Reject
-                    </button>
-                  </div>
+                  <p className="font-bold text-emerald-700 text-lg">{formatMK(Number(s.amount))}</p>
                 </div>
-              );
-            })}
-          </div>
+                <p className="text-xs text-slate-500">
+                  {s.method} · {s.paid_date} · Ref: {s.reference_used || "—"}
+                </p>
+                {s.transaction_id && <p className="text-xs">Txn ID: <strong>{s.transaction_id}</strong></p>}
+                {s.notes && <p className="text-xs text-slate-400">{s.notes}</p>}
+                {s.proof_url && (
+                  <a href={s.proof_url} target="_blank" rel="noreferrer" className="block">
+                    <img src={s.proof_url} alt="Proof" className="max-h-40 rounded-lg border" />
+                  </a>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <button onClick={() => confirm(s.id)} disabled={busy === s.id}
+                    className="flex-1 bg-green-600 text-white py-2 rounded-xl text-sm font-semibold disabled:opacity-50">
+                    {busy === s.id ? "..." : "Confirm"}
+                  </button>
+                  <button onClick={() => reject(s.id)} disabled={busy === s.id}
+                    className="px-4 border border-red-200 text-red-600 rounded-xl text-sm">
+                    Reject
+                  </button>
+                </div>
+              </div>
+            );
+          })
         )}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
