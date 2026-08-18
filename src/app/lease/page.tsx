@@ -12,7 +12,7 @@ const DEFAULT_CLAUSES = `1. PARTIES AND PREMISES
 The Landlord lets and the Tenant takes the premises described in this agreement for residential use only.
 
 2. RENT
-The Tenant shall pay the monthly rent stated herein in Malawi Kwacha (MK), on or before the agreed payment day of each month, to the Landlord's nominated bank or mobile money account.
+The Tenant shall pay the monthly rentals (between 2 -12 months  in advance) stated herein in Malawi Kwacha (MK), on or before the agreed payment day of each month, to the Landlord's nominated bank or mobile money account (including withdrawal fees).
 
 3. DEPOSIT
 The Tenant shall pay a security deposit as stated herein. The deposit shall be refunded within a reasonable period after move-out, less lawful deductions for unpaid rent, utilities, or damage beyond fair wear and tear.
@@ -27,10 +27,10 @@ Either party may terminate by written notice of not less than the notice period 
 The premises shall be used only as a private dwelling. The Tenant shall not sublet or assign without the Landlord's prior written consent.
 
 7. CARE OF PREMISES
-The Tenant shall keep the interior reasonably clean and report structural defects, leaks, and electrical hazards promptly. Alterations require written consent.
+The Tenant shall keep the interior and exterior areas reasonably clean and report structural defects, leaks, and electrical hazards promptly. Alterations require written consent.
 
-8. UTILITIES
-Unless otherwise agreed, the Tenant is responsible for electricity, water, and other metered utilities. The Landlord remains responsible for structural repairs unless otherwise agreed.
+8. UTILITIES AND MAINTENANCE
+Unless otherwise agreed, the Tenant is responsible for electricity, water, and other metered utilities. The Landlord remains responsible for structural repairs only caused by natural means or unless otherwise agreed. Provided always during and upon the expiry of the tenancy the Tenant shall undertake to repair, replace, refurbish, and reinstate the premises to its original state of condition. 
 
 9. ACCESS
 The Landlord or agent may enter at reasonable times with reasonable prior notice (except in emergency) to inspect, repair, or show the premises.
