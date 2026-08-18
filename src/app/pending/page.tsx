@@ -77,6 +77,21 @@ export default function PendingPage() {
     if (data?.payment_id) {
       window.open(`/receipt?id=${data.payment_id}`, "_blank");
     }
+
+    const row = items.find((x) => x.id === id);
+const t = row ? tenantOf(row) : null;
+if (t?.email && data?.payment_id) {
+  await supabase.functions.invoke("send-email", {
+    body: {
+      to: t.email,
+      subject: "Payment confirmed – Rentozi",
+      html: `<p>Hello ${t.name},</p>
+<p>Your rent payment has been confirmed.</p>
+<p><a href="https://rentozi.netlify.app/receipt?id=${data.payment_id}">View receipt</a></p>`,
+      text: `Payment confirmed. Receipt: https://rentozi.netlify.app/receipt?id=${data.payment_id}`,
+    },
+  });
+}
         // Email tenant if we have an address
     const t = tenantOf(items.find((x) => x.id === id)!);
     if (t.email && data?.payment_id) {
