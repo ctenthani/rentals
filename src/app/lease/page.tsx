@@ -2,12 +2,44 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
+
+const DEFAULT_CLAUSES = `1. PARTIES AND PREMISES
+The Landlord lets and the Tenant takes the premises described in this agreement for residential use only.
+
+2. RENT
+The Tenant shall pay the monthly rentals stated herein in Malawi Kwacha (MK), on or before the agreed payment day of each month, to the Landlord's nominated bank or mobile money account (including withdrawal fees).
+
+3. DEPOSIT
+The Tenant shall pay a security deposit as stated herein. The deposit shall be refunded within a reasonable period after move-out, less lawful deductions for unpaid rent, utilities, or damage beyond fair wear and tear.
+
+4. TERM AND RENEWAL
+The tenancy runs from the start date to the end date stated herein. Occupation after the end date with the Landlord's consent may continue month-to-month on the same terms until terminated with the notice period below.
+
+5. NOTICE AND TERMINATION
+Either party may terminate by written notice of not less than the notice period stated herein (default 30 days).
+
+6. USE AND OCCUPATION
+The premises shall be used only as a private dwelling. The Tenant shall not sublet or assign without the Landlord's prior written consent.
+
+7. CARE OF PREMISES
+The Tenant shall keep the interior reasonably clean and report structural defects promptly. Alterations require written consent.
+
+8. UTILITIES AND MAINTENANCE
+Unless otherwise agreed, the Tenant is responsible for electricity, water, and other metered utilities. The Landlord remains responsible for structural repairs unless otherwise agreed.
+
+9. ACCESS
+The Landlord or agent may enter at reasonable times with reasonable prior notice (except in emergency) to inspect, repair, or show the premises.
+
+10. ENTIRE AGREEMENT
+This document constitutes the whole agreement. Variations must be in writing and signed by both parties.
+
+11. ELECTRONIC SIGNATURES
+Signatures applied electronically on this platform (drawn or uploaded) may be used to execute this agreement.`;
 
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -19,10 +51,12 @@ function formatMK(amount: number) {
     .replace("MWK", "MK");
 }
 
-function SignaturePad({
+function SignatureBlock({
+  label,
   value,
   onChange,
 }: {
+  label: string;
   value: string | null;
   onChange: (v: string | null) => void;
 }) {
@@ -99,35 +133,38 @@ function SignaturePad({
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2 text-xs no-print">
-        <button
-          type="button"
-          onClick={() => setMode("draw")}
-          className={`px-2 py-1 rounded-lg ${
-            mode === "draw" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"
-          }`}
-        >
-          Draw
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("upload")}
-          className={`px-2 py-1 rounded-lg ${
-            mode === "upload"
-              ? "bg-emerald-100 text-emerald-800"
-              : "text-slate-500"
-          }`}
-        >
-          Upload
-        </button>
-        <button type="button" onClick={clear} className="text-slate-500">
-          Clear
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 no-print">
+        <span className="text-sm font-semibold">{label}</span>
+        <div className="flex gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setMode("draw")}
+            className={`px-2 py-1 rounded-lg ${
+              mode === "draw" ? "bg-emerald-100 text-emerald-800" : "text-slate-500"
+            }`}
+          >
+            Draw
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("upload")}
+            className={`px-2 py-1 rounded-lg ${
+              mode === "upload"
+                ? "bg-emerald-100 text-emerald-800"
+                : "text-slate-500"
+            }`}
+          >
+            Upload
+          </button>
+          <button type="button" onClick={clear} className="text-slate-500">
+            Clear
+          </button>
+        </div>
       </div>
       {value && (
         <img
           src={value}
-          alt="Signature"
+          alt={label}
           className="max-h-20 border rounded bg-white"
         />
       )}
@@ -147,19 +184,25 @@ function SignaturePad({
             onTouchEnd={end}
           />
         ) : (
-          <input type="file" accept="image/*" onChange={onFile} className="block w-full text-sm" />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={onFile}
+            className="block w-full text-sm"
+          />
         )}
       </div>
     </div>
   );
 }
 
-export default function TenantLeasePage() {
+export default function LandlordLeasePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [lease, setLease] = useState<any>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+
   const [tenantName, setTenantName] = useState("");
   const [phone, setPhone] = useState("");
   const [nationalId, setNationalId] = useState("");
@@ -172,34 +215,49 @@ export default function TenantLeasePage() {
   const [landlordName, setLandlordName] = useState(
     "Chifundo and Wezzie Tenthani"
   );
-  const [monthlyRent, setMonthlyRent] = useState(0);
+
+  const [startDate, setStartDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [endDate, setEndDate] = useState("");
+  const [monthlyRent, setMonthlyRent] = useState("");
+  const [deposit, setDeposit] = useState("");
+  const [paymentDay, setPaymentDay] = useState("1");
+  const [noticeDays, setNoticeDays] = useState("30");
+  const [moveIn, setMoveIn] = useState("");
+  const [terms, setTerms] = useState(DEFAULT_CLAUSES);
+
+  const [landlordSig, setLandlordSig] = useState<string | null>(null);
   const [tenantSig, setTenantSig] = useState<string | null>(null);
+  const [landlordSigner, setLandlordSigner] = useState(
+    "Chifundo and Wezzie Tenthani"
+  );
   const [tenantSigner, setTenantSigner] = useState("");
 
-  const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
+    const tid = new URLSearchParams(window.location.search).get("tenant_id");
+    setTenantId(tid);
+
     async function load() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/auth/login");
+      if (!tid) {
+        setError("Missing tenant_id — open Lease from the dashboard");
+        setLoading(false);
         return;
       }
 
       const { data: tenant, error: tErr } = await supabase
         .from("tenants")
         .select(
-          `id, full_name, phone, national_id, landlord_id,
+          `id, full_name, phone, national_id, move_in_date, landlord_id,
            houses ( name, code, monthly_rent, bank_account )`
         )
-        .eq("auth_user_id", session.user.id)
+        .eq("id", tid)
         .maybeSingle();
 
       if (tErr || !tenant) {
-        setError("No tenant profile linked to this login");
+        setError(tErr?.message || "Tenant not found");
         setLoading(false);
         return;
       }
@@ -211,15 +269,16 @@ export default function TenantLeasePage() {
       setTenantName(tenant.full_name || "");
       setPhone(tenant.phone || "");
       setNationalId(tenant.national_id || "");
+      setMoveIn(tenant.move_in_date || "");
       setHouseName(house?.name || "");
       setHouseCode(house?.code || "");
       setBankAccount(house?.bank_account || "");
-      setMonthlyRent(Number(house?.monthly_rent || 0));
+      setMonthlyRent(String(house?.monthly_rent || ""));
       setTenantSigner(tenant.full_name || "");
 
-      // Always show landlord names (fallback + DB)
       setLandlordBusiness("Chifundo and Wezzie");
       setLandlordName("Chifundo and Wezzie Tenthani");
+      setLandlordSigner("Chifundo and Wezzie Tenthani");
 
       if (tenant.landlord_id) {
         const { data: ll } = await supabase
@@ -228,67 +287,83 @@ export default function TenantLeasePage() {
           .eq("id", tenant.landlord_id)
           .maybeSingle();
         if (ll?.business_name) setLandlordBusiness(ll.business_name);
-        if (ll?.full_name) setLandlordName(ll.full_name);
+        if (ll?.full_name) {
+          setLandlordName(ll.full_name);
+          setLandlordSigner(ll.full_name);
+        }
       }
 
-      const { data: leaseRow } = await supabase
+      const { data: lease } = await supabase
         .from("leases")
         .select("*")
-        .eq("tenant_id", tenant.id)
+        .eq("tenant_id", tid)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (!leaseRow) {
-        setError("Your landlord has not created a lease yet.");
-        setLoading(false);
-        return;
+      if (lease) {
+        if (lease.start_date) setStartDate(lease.start_date);
+        setEndDate(lease.end_date || "");
+        setMonthlyRent(String(lease.monthly_rent || monthlyRent));
+        setDeposit(String(lease.deposit_amount ?? "0"));
+        setPaymentDay(String(lease.payment_day || "1"));
+        setNoticeDays(String(lease.notice_period_days || "30"));
+        if (lease.terms) setTerms(lease.terms);
+        if (lease.landlord_signature) setLandlordSig(lease.landlord_signature);
+        if (lease.tenant_signature) setTenantSig(lease.tenant_signature);
+        if (lease.landlord_signer_name)
+          setLandlordSigner(lease.landlord_signer_name);
+        if (lease.tenant_signer_name) setTenantSigner(lease.tenant_signer_name);
       }
 
-      setLease(leaseRow);
-      if (leaseRow.tenant_signature) setTenantSig(leaseRow.tenant_signature);
-      if (leaseRow.tenant_signer_name)
-        setTenantSigner(leaseRow.tenant_signer_name);
-      if (leaseRow.landlord_signer_name)
-        setLandlordName(leaseRow.landlord_signer_name);
-      if (leaseRow.monthly_rent) setMonthlyRent(Number(leaseRow.monthly_rent));
       setLoading(false);
     }
-    load();
-  }, [router]);
 
-  const handleSaveSignature = async () => {
-    if (!tenantSig) {
-      setError("Please draw or upload your signature first");
+    load();
+  }, []);
+
+  const handleSave = async () => {
+    if (!tenantId || !startDate || !monthlyRent) {
+      setError("Start date and rent are required");
       return;
     }
+
     setSaving(true);
     setError(null);
     setSuccess(null);
-    const { data, error: rpcError } = await supabase.rpc("tenant_sign_lease", {
-      p_tenant_signature: tenantSig,
-      p_tenant_signer_name: tenantSigner || tenantName,
-    });
+
+    const { data, error: rpcError } = await supabase.rpc(
+      "landlord_upsert_lease",
+      {
+        p_tenant_id: tenantId,
+        p_start_date: startDate,
+        p_end_date: endDate || null,
+        p_monthly_rent: Number(monthlyRent),
+        p_deposit: Number(deposit || 0),
+        p_payment_day: Number(paymentDay || 1),
+        p_notice_days: Number(noticeDays || 30),
+        p_terms: terms,
+        p_national_id: nationalId || null,
+        p_move_in: moveIn || null,
+        p_landlord_signature: landlordSig,
+        p_landlord_signer_name: landlordSigner || null,
+        p_tenant_signature: tenantSig,
+        p_tenant_signer_name: tenantSigner || null,
+      }
+    );
+
     setSaving(false);
+
     if (rpcError) {
       setError(rpcError.message);
       return;
     }
     if (data?.success === false) {
-      setError(data.error || "Could not save");
+      setError(data.error || "Save failed");
       return;
     }
-    setSuccess("Signature saved");
-    setLease((prev: any) =>
-      prev
-        ? {
-            ...prev,
-            tenant_signature: tenantSig,
-            tenant_signer_name: tenantSigner,
-            tenant_signed_at: new Date().toISOString(),
-          }
-        : prev
-    );
+
+    setSuccess("Lease saved successfully");
   };
 
   if (loading) {
@@ -299,12 +374,12 @@ export default function TenantLeasePage() {
     );
   }
 
-  if (error && !lease) {
+  if (error && !tenantName) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-4">
-        <p className="text-red-600 text-sm text-center">{error}</p>
-        <Link href="/tenant" className="text-green-700 text-sm font-medium">
-          ← Tenant portal
+        <p className="text-red-600 text-sm">{error}</p>
+        <Link href="/dashboard" className="text-green-700 text-sm">
+          ← Dashboard
         </Link>
       </div>
     );
@@ -314,8 +389,8 @@ export default function TenantLeasePage() {
     <div className="min-h-screen bg-white">
       <div className="max-w-3xl mx-auto px-4 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6 no-print">
-          <Link href="/tenant" className="text-sm text-slate-600">
-            ← Tenant portal
+          <Link href="/dashboard" className="text-sm text-slate-600">
+            ← Dashboard
           </Link>
           <div className="flex gap-2">
             <button
@@ -323,18 +398,19 @@ export default function TenantLeasePage() {
               onClick={() => window.print()}
               className="border px-4 py-2 rounded-xl text-sm font-medium"
             >
-              Download / Print PDF
+              Print / PDF
             </button>
             <button
               type="button"
-              onClick={handleSaveSignature}
+              onClick={handleSave}
               disabled={saving}
               className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
             >
-              {saving ? "Saving..." : "Save my signature"}
+              {saving ? "Saving..." : "Save lease"}
             </button>
           </div>
         </div>
+
         {error && (
           <p className="mb-4 text-sm text-red-600 bg-red-50 p-3 rounded-xl no-print">
             {error}
@@ -353,6 +429,7 @@ export default function TenantLeasePage() {
           <h1 className="text-xl font-bold text-center mb-6">
             RESIDENTIAL TENANCY AGREEMENT
           </h1>
+
           <div className="grid sm:grid-cols-2 gap-4 text-sm mb-4">
             <div>
               <p className="text-xs uppercase text-slate-500 font-semibold">
@@ -383,46 +460,147 @@ export default function TenantLeasePage() {
               <p className="font-medium">{bankAccount || "—"}</p>
             </div>
           </div>
+
+          <div className="grid sm:grid-cols-2 gap-3 mb-4 no-print">
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                National ID
+              </label>
+              <input
+                value={nationalId}
+                onChange={(e) => setNationalId(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Move-in date
+              </label>
+              <input
+                type="date"
+                value={moveIn}
+                onChange={(e) => setMoveIn(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Lease start *
+              </label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Lease end
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Monthly rent (MK) *
+              </label>
+              <input
+                type="number"
+                value={monthlyRent}
+                onChange={(e) => setMonthlyRent(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Deposit (MK)
+              </label>
+              <input
+                type="number"
+                value={deposit}
+                onChange={(e) => setDeposit(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Payment day
+              </label>
+              <input
+                type="number"
+                value={paymentDay}
+                onChange={(e) => setPaymentDay(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Notice (days)
+              </label>
+              <input
+                type="number"
+                value={noticeDays}
+                onChange={(e) => setNoticeDays(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              />
+            </div>
+          </div>
+
           <div className="text-sm space-y-1 mb-4">
             <p>
               <strong>National ID:</strong> {nationalId || "—"}
             </p>
             <p>
-              <strong>Lease period:</strong> {lease?.start_date || "—"} to{" "}
-              {lease?.end_date || "open"}
+              <strong>Move-in:</strong> {moveIn || "—"}
+            </p>
+            <p>
+              <strong>Lease period:</strong> {startDate} to {endDate || "open"}
             </p>
             <p>
               <strong>Monthly rent:</strong>{" "}
-              {formatMK(Number(lease?.monthly_rent || monthlyRent))}
+              {formatMK(Number(monthlyRent || 0))}
             </p>
             <p>
-              <strong>Deposit:</strong>{" "}
-              {formatMK(Number(lease?.deposit_amount || 0))}
+              <strong>Deposit:</strong> {formatMK(Number(deposit || 0))}
+            </p>
+            <p>
+              <strong>Payment day:</strong> {paymentDay} ·{" "}
+              <strong>Notice:</strong> {noticeDays} days
             </p>
           </div>
+
           <h2 className="text-sm font-bold uppercase mb-2">
             Terms and conditions
           </h2>
-          <div className="text-sm leading-relaxed whitespace-pre-wrap mb-8">
-            {lease?.terms || "No terms saved yet."}
+          <textarea
+            value={terms}
+            onChange={(e) => setTerms(e.target.value)}
+            rows={16}
+            className="w-full border rounded-xl px-3 py-2 text-xs leading-relaxed no-print mb-4"
+          />
+          <div className="text-sm leading-relaxed whitespace-pre-wrap mb-8 print-terms">
+            {terms}
           </div>
+
           <div className="grid sm:grid-cols-2 gap-8">
             <div className="space-y-2">
               <p className="text-sm font-semibold">Landlord</p>
-              <p className="text-sm">
-                {lease?.landlord_signer_name || landlordName}
-              </p>
-              {lease?.landlord_signature ? (
-                <img
-                  src={lease.landlord_signature}
-                  alt="Landlord"
-                  className="max-h-20 border rounded bg-white"
-                />
-              ) : (
-                <p className="text-xs text-slate-400">
-                  Awaiting landlord signature
-                </p>
-              )}
+              <input
+                value={landlordSigner}
+                onChange={(e) => setLandlordSigner(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm no-print"
+              />
+              <p className="text-sm only-print">{landlordSigner}</p>
+              <SignatureBlock
+                label="Signature"
+                value={landlordSig}
+                onChange={setLandlordSig}
+              />
             </div>
             <div className="space-y-2">
               <p className="text-sm font-semibold">Tenant</p>
@@ -432,22 +610,21 @@ export default function TenantLeasePage() {
                 className="w-full border rounded-xl px-3 py-2 text-sm no-print"
               />
               <p className="text-sm only-print">{tenantSigner}</p>
-              <div className="no-print">
-                <SignaturePad value={tenantSig} onChange={setTenantSig} />
-              </div>
-              {(tenantSig || lease?.tenant_signature) && (
-                <img
-                  src={tenantSig || lease.tenant_signature}
-                  alt="Tenant"
-                  className="max-h-20 border rounded bg-white only-print"
-                />
-              )}
+              <SignatureBlock
+                label="Signature"
+                value={tenantSig}
+                onChange={setTenantSig}
+              />
             </div>
           </div>
         </article>
       </div>
+
       <style jsx global>{`
         .only-print {
+          display: none;
+        }
+        .print-terms {
           display: none;
         }
         @media print {
@@ -456,6 +633,10 @@ export default function TenantLeasePage() {
           }
           .only-print {
             display: block !important;
+          }
+          .print-terms {
+            display: block !important;
+            white-space: pre-wrap;
           }
           body {
             background: white;
