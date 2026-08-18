@@ -659,6 +659,30 @@ export default function LandlordDashboard() {
         </div>
       </main>
 
+      const [pendingCount, setPendingCount] = useState(0);
+
+// inside loadData after tenantIds:
+if (tenantIds.length > 0) {
+  const { count } = await supabase
+    .from("payment_submissions")
+    .select("id", { count: "exact", head: true })
+    .in("tenant_id", tenantIds)
+    .eq("status", "pending");
+  setPendingCount(count || 0);
+}
+
+// nav item:
+<Link href="/pending" className={`px-3 py-1.5 text-xs font-semibold rounded-lg relative ${
+  pendingCount > 0 ? "bg-amber-100 text-amber-900 animate-pulse" : "text-slate-600 hover:bg-emerald-50"
+}`}>
+  Pending
+  {pendingCount > 0 && (
+    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center animate-bounce">
+      {pendingCount}
+    </span>
+  )}
+</Link>
+      
       {showAdd && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
