@@ -96,8 +96,9 @@ export default function DashboardPage() {
       .select("id")
       .eq("auth_user_id", session.user.id)
       .maybeSingle();
-    if (landlord) landlordId = landlord.id;
-    else {
+    if (landlord) {
+      landlordId = landlord.id;
+    } else {
       const { data: mem } = await supabase
         .from("landlord_members")
         .select("landlord_id")
@@ -193,9 +194,7 @@ export default function DashboardPage() {
       p_months_in_advance: Number(editing.months_in_advance || 0),
     });
 
-    setSaving(false);
     if (rpcErr) {
-      // fallback direct updates
       await supabase
         .from("tenants")
         .update({
@@ -226,6 +225,7 @@ export default function DashboardPage() {
       });
     }
 
+    setSaving(false);
     setEditing(null);
     await loadData();
   };
@@ -236,7 +236,9 @@ export default function DashboardPage() {
       return;
     }
     setSaving(true);
-    const password = Math.random().toString(36).slice(-10) + "A1";
+    setError(null);
+    const password = "1234";
+
     const { data, error: fnErr } = await supabase.functions.invoke(
       "create-tenant-user",
       {
@@ -248,7 +250,9 @@ export default function DashboardPage() {
         },
       }
     );
+
     setSaving(false);
+
     if (fnErr) {
       setError(fnErr.message);
       return;
@@ -257,17 +261,23 @@ export default function DashboardPage() {
       setError(data.error);
       return;
     }
+
     await supabase.functions.invoke("send-email", {
       body: {
         to: editing.email,
         subject: "Your Rentozi tenant login",
         html: `<p>Hello ${editing.full_name},</p>
-<p>Login: <a href="https://rentozi.netlify.app/auth/login">https://rentozi.netlify.app/auth/login</a></p>
-<p>Email: ${editing.email}<br/>Temporary password: ${password}</p>`,
-        text: `Login https://rentozi.netlify.app/auth/login Email: ${editing.email} Password: ${password}`,
+<p>Your tenant portal is ready.</p>
+<p><strong>Login:</strong> <a href="https://rentozi.netlify.app/auth/login">https://rentozi.netlify.app/auth/login</a><br/>
+<strong>Email:</strong> ${editing.email}<br/>
+<strong>Temporary password:</strong> 1234</p>
+<p>Please change your password after first login.</p>
+<p>Thank you.<br/>Chifundo and Wezzie Tenthani<br/>Rentozi Rentals</p>`,
+        text: `Login: https://rentozi.netlify.app/auth/login Email: ${editing.email} Password: 1234`,
       },
     });
-    alert(`Login created. Password: ${password}`);
+
+    alert("Login created. Password 1234 emailed to tenant.");
     await loadData();
   };
 
@@ -275,6 +285,7 @@ export default function DashboardPage() {
     e.preventDefault();
     setSaving(true);
     setError(null);
+
     const { error: rpcErr } = await supabase.rpc("landlord_add_property", {
       p_house_name: addForm.house_name,
       p_house_code: addForm.house_code,
@@ -284,11 +295,14 @@ export default function DashboardPage() {
       p_phone: addForm.phone,
       p_email: addForm.email || null,
     });
+
     setSaving(false);
+
     if (rpcErr) {
       setError(rpcErr.message);
       return;
     }
+
     setShowAdd(false);
     setAddForm({
       house_name: "",
@@ -305,6 +319,7 @@ export default function DashboardPage() {
   const handleDelete = async (tenantId: string) => {
     if (!confirm("Remove this property/tenant?")) return;
     await supabase.rpc("landlord_delete_property", { p_tenant_id: tenantId });
+    setEditing(null);
     await loadData();
   };
 
@@ -463,7 +478,10 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr
+                  key={r.id}
+                  className="border-t border-slate-100 hover:bg-slate-50"
+                >
                   <td className="px-2 py-2 font-medium">
                     {r.house_code}
                     <div className="text-[10px] text-slate-400 truncate">
@@ -478,7 +496,9 @@ export default function DashboardPage() {
                   <td className="px-2 py-2">{r.next_due_date || "—"}</td>
                   <td className="px-2 py-2 text-[11px]">
                     {getPaidMonths(r.next_due_date, r.months_in_advance)}
-                    <div className="text-slate-400">{r.months_in_advance} mo adv</div>
+                    <div className="text-slate-400">
+                      {r.months_in_advance} mo adv
+                    </div>
                   </td>
                   <td className="px-2 py-2 font-semibold text-rose-600">
                     {formatMK(r.current_balance)}
@@ -486,8 +506,12 @@ export default function DashboardPage() {
                   <td className="px-2 py-2">
                     <StatusBadge status={r.status} />
                   </td>
-                  <td className="px-2 py-2 text-[10px]">{r.bank_account || "—"}</td>
-                  <td className="px-2 py-2">{r.auth_user_id ? "Yes" : "No"}</td>
+                  <td className="px-2 py-2 text-[10px]">
+                    {r.bank_account || "—"}
+                  </td>
+                  <td className="px-2 py-2">
+                    {r.auth_user_id ? "Yes" : "No"}
+                  </td>
                   <td className="px-2 py-2 space-x-1 whitespace-nowrap">
                     <button
                       onClick={() => setEditing({ ...r })}
@@ -513,76 +537,118 @@ export default function DashboardPage() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg p-5 space-y-3 max-h-[90vh] overflow-y-auto">
             <h3 className="font-bold text-lg">Edit property</h3>
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.full_name}
-              onChange={(e) =>
-                setEditing({ ...editing, full_name: e.target.value })
-              }
-              placeholder="Tenant name"
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.phone || ""}
-              onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
-              placeholder="Phone"
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.email || ""}
-              onChange={(e) => setEditing({ ...editing, email: e.target.value })}
-              placeholder="Email"
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.house_name}
-              onChange={(e) =>
-                setEditing({ ...editing, house_name: e.target.value })
-              }
-              placeholder="House name"
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.house_code}
-              onChange={(e) =>
-                setEditing({ ...editing, house_code: e.target.value })
-              }
-              placeholder="House code"
-            />
-            <input
-              type="number"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.monthly_rent}
-              onChange={(e) =>
-                setEditing({ ...editing, monthly_rent: e.target.value })
-              }
-              placeholder="Monthly rent"
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.bank_account || ""}
-              onChange={(e) =>
-                setEditing({ ...editing, bank_account: e.target.value })
-              }
-              placeholder="Bank account"
-            />
-            <input
-              type="date"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.next_due_date || ""}
-              onChange={(e) =>
-                setEditing({ ...editing, next_due_date: e.target.value })
-              }
-            />
-            <input
-              type="number"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.months_in_advance}
-              onChange={(e) =>
-                setEditing({ ...editing, months_in_advance: e.target.value })
-              }
-              placeholder="Months in advance"
-            />
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Tenant name
+              </label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.full_name}
+                onChange={(e) =>
+                  setEditing({ ...editing, full_name: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">Phone</label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.phone || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, phone: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">Email</label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.email || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, email: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                House name
+              </label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.house_name}
+                onChange={(e) =>
+                  setEditing({ ...editing, house_name: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                House code
+              </label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.house_code}
+                onChange={(e) =>
+                  setEditing({ ...editing, house_code: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Monthly rent (MK)
+              </label>
+              <input
+                type="number"
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.monthly_rent}
+                onChange={(e) =>
+                  setEditing({ ...editing, monthly_rent: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Bank account
+              </label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.bank_account || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, bank_account: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Next due date
+              </label>
+              <input
+                type="date"
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.next_due_date || ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, next_due_date: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Months paid in advance
+              </label>
+              <input
+                type="number"
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={editing.months_in_advance}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    months_in_advance: e.target.value,
+                  })
+                }
+              />
+            </div>
+
             <div className="flex flex-wrap gap-2 pt-2">
               <button
                 onClick={handleSaveEdit}
@@ -622,64 +688,93 @@ export default function DashboardPage() {
             className="bg-white rounded-2xl w-full max-w-lg p-5 space-y-3"
           >
             <h3 className="font-bold text-lg">Add property</h3>
-            <input
-              required
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="House name"
-              value={addForm.house_name}
-              onChange={(e) =>
-                setAddForm({ ...addForm, house_name: e.target.value })
-              }
-            />
-            <input
-              required
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="Code e.g. H13"
-              value={addForm.house_code}
-              onChange={(e) =>
-                setAddForm({ ...addForm, house_code: e.target.value })
-              }
-            />
-            <input
-              required
-              type="number"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="Monthly rent"
-              value={addForm.monthly_rent}
-              onChange={(e) =>
-                setAddForm({ ...addForm, monthly_rent: e.target.value })
-              }
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="Bank account"
-              value={addForm.bank_account}
-              onChange={(e) =>
-                setAddForm({ ...addForm, bank_account: e.target.value })
-              }
-            />
-            <input
-              required
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="Tenant full name"
-              value={addForm.tenant_name}
-              onChange={(e) =>
-                setAddForm({ ...addForm, tenant_name: e.target.value })
-              }
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="Phone"
-              value={addForm.phone}
-              onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
-            />
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              placeholder="Email"
-              value={addForm.email}
-              onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
-            />
-            <div className="flex gap-2">
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                House name
+              </label>
+              <input
+                required
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={addForm.house_name}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, house_name: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                House code
+              </label>
+              <input
+                required
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                placeholder="e.g. H13"
+                value={addForm.house_code}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, house_code: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Monthly rent (MK)
+              </label>
+              <input
+                required
+                type="number"
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={addForm.monthly_rent}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, monthly_rent: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Bank account
+              </label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={addForm.bank_account}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, bank_account: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Tenant full name
+              </label>
+              <input
+                required
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={addForm.tenant_name}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, tenant_name: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">Phone</label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={addForm.phone}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, phone: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">Email</label>
+              <input
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={addForm.email}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, email: e.target.value })
+                }
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
               <button
                 type="submit"
                 disabled={saving}
