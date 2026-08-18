@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [loginPassword, setLoginPassword] = useState("123456");
   const [addForm, setAddForm] = useState({
     house_name: "",
     house_code: "",
@@ -230,21 +231,25 @@ export default function DashboardPage() {
     await loadData();
   };
 
-  const handleCreateLogin = async () => {
+   const handleCreateLogin = async () => {
     if (!editing?.email) {
       setError("Set tenant email first");
       return;
     }
+    if (!loginPassword || loginPassword.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+
     setSaving(true);
     setError(null);
-    const password = "1234";
 
     const { data, error: fnErr } = await supabase.functions.invoke(
       "create-tenant-user",
       {
         body: {
-          email: editing.email,
-          password,
+          email: editing.email.trim(),
+          password: loginPassword,
           tenant_id: editing.id,
           full_name: editing.full_name,
         },
@@ -254,7 +259,7 @@ export default function DashboardPage() {
     setSaving(false);
 
     if (fnErr) {
-      setError(fnErr.message);
+      setError(fnErr.message || "Edge Function error");
       return;
     }
     if (data?.error) {
@@ -264,20 +269,21 @@ export default function DashboardPage() {
 
     await supabase.functions.invoke("send-email", {
       body: {
-        to: editing.email,
+        to: editing.email.trim(),
         subject: "Your Rentozi tenant login",
         html: `<p>Hello ${editing.full_name},</p>
 <p>Your tenant portal is ready.</p>
 <p><strong>Login:</strong> <a href="https://rentozi.netlify.app/auth/login">https://rentozi.netlify.app/auth/login</a><br/>
 <strong>Email:</strong> ${editing.email}<br/>
-<strong>Temporary password:</strong> 1234</p>
+<strong>Temporary password:</strong> ${loginPassword}</p>
 <p>Please change your password after first login.</p>
 <p>Thank you.<br/>Chifundo and Wezzie Tenthani<br/>Rentozi Rentals</p>`,
-        text: `Login: https://rentozi.netlify.app/auth/login Email: ${editing.email} Password: 1234`,
+        text: `Login: https://rentozi.netlify.app/auth/login Email: ${editing.email} Password: ${loginPassword}`,
       },
     });
 
-    alert("Login created. Password 1234 emailed to tenant.");
+    alert(`Login created. Password: ${loginPassword}`);
+    setLoginPassword("123456");
     await loadData();
   };
 
@@ -648,7 +654,21 @@ export default function DashboardPage() {
                 }
               />
             </div>
-
+                        <div className="border-t pt-3 mt-2">
+              <label className="text-xs font-semibold text-slate-500">
+                Default password for Create login (min 6 characters)
+              </label>
+              <input
+                type="text"
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="123456"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Tenant will receive this password by email.
+              </p>
+            </div>
             <div className="flex flex-wrap gap-2 pt-2">
               <button
                 onClick={handleSaveEdit}
