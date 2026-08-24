@@ -35,6 +35,8 @@ function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number) {
   return months.join(", ");
 }
 
+type Tab = "home" | "pay" | "issues";
+
 export default function TenantPortalPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,9 +45,10 @@ export default function TenantPortalPage() {
   const [balance, setBalance] = useState<any>(null);
   const [house, setHouse] = useState<any>(null);
   const [payments, setPayments] = useState<any[]>([]);
-  const [showPay, setShowPay] = useState(false);
+  const [tab, setTab] = useState<Tab>("home");
   const [submitting, setSubmitting] = useState(false);
 
+  // Payment form
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("Bank Transfer");
   const [paidDate, setPaidDate] = useState(
@@ -55,6 +58,12 @@ export default function TenantPortalPage() {
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
+
+  // Issue form
+  const [issueCategory, setIssueCategory] = useState("Maintenance");
+  const [issueSubject, setIssueSubject] = useState("");
+  const [issueDetails, setIssueDetails] = useState("");
+  const [issuePhoto, setIssuePhoto] = useState<File | null>(null);
 
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -122,31 +131,30 @@ export default function TenantPortalPage() {
     return 2;
   })();
 
-  const notifyLandlord = async (payload: {
+  const getLandlordEmail = async (landlordId: string | null) => {
+    if (landlordId) {
+      const { data: ll } = await supabase
+        .from("landlords")
+        .select("email")
+        .eq("id", landlordId)
+        .maybeSingle();
+      if (ll?.email) return ll.email as string;
+    }
+    return "ctenthani@gmail.com";
+  };
+
+  const houseLabel = () =>
+    house ? `${house.name} (${house.code})` : "property";
+
+  const notifyLandlordPayment = async (payload: {
     fullName: string;
     landlordId: string | null;
-    houseLabel: string;
     amount: number;
     method: string;
     txn: string;
   }) => {
     try {
-      let landlordEmail: string | null = null;
-
-      if (payload.landlordId) {
-        const { data: ll } = await supabase
-          .from("landlords")
-          .select("email, full_name")
-          .eq("id", payload.landlordId)
-          .maybeSingle();
-        landlordEmail = ll?.email || null;
-      }
-
-      // Fallback so you always get notified while email column is empty
-      if (!landlordEmail) {
-        landlordEmail = "ctenthani@gmail.com";
-      }
-
+      const landlordEmail = await getLandlordEmail(payload.landlordId);
       await supabase.functions.invoke("send-email", {
         body: {
           to: landlordEmail,
@@ -154,18 +162,18 @@ export default function TenantPortalPage() {
           html: `<p>Hello,</p>
 <p><strong>${payload.fullName}</strong> submitted a rent payment that needs your confirmation.</p>
 <ul>
-  <li><strong>Property:</strong> ${payload.houseLabel}</li>
+  <li><strong>Property:</strong> ${houseLabel()}</li>
   <li><strong>Amount:</strong> MK ${Number(payload.amount).toLocaleString()}</li>
   <li><strong>Method:</strong> ${payload.method}</li>
   <li><strong>Txn / Ref:</strong> ${payload.txn || "—"}</li>
 </ul>
 <p><a href="https://rentozi.netlify.app/pending"><strong>Open Pending payments</strong></a></p>
 <p>Rentozi Rentals</p>`,
-          text: `${payload.fullName} submitted a payment for ${payload.houseLabel}. Confirm: https://rentozi.netlify.app/pending`,
+          text: `${payload.fullName} submitted a payment. Confirm: https://rentozi.netlify.app/pending`,
         },
       });
     } catch (e) {
-      console.log("Landlord notify failed", e);
+      console.log("Landlord payment notify failed", e);
     }
   };
 
@@ -188,7 +196,6 @@ export default function TenantPortalPage() {
     setMsg(null);
 
     let proofUrl: string | null = null;
-
     if (proofFile) {
       const path = `${tenant.id}/${Date.now()}-${proofFile.name.replace(
         /[^a-zA-Z0-9._-]/g,
@@ -226,14 +233,9 @@ export default function TenantPortalPage() {
       return;
     }
 
-    const houseLabel = house
-      ? `${house.name} (${house.code})`
-      : "property";
-
-    await notifyLandlord({
+    await notifyLandlordPayment({
       fullName: tenant.full_name,
       landlordId: tenant.landlord_id,
-      houseLabel,
       amount: amt,
       method,
       txn: transactionId.trim() || reference.trim(),
@@ -241,15 +243,100 @@ export default function TenantPortalPage() {
 
     setSubmitting(false);
     setMsg(
-      "Payment report submitted. The landlord has been notified and will confirm soon."
+      "Payment report submitted. Your landlord has been notified by email."
     );
-    setShowPay(false);
+    setTab("home");
     setAmount("");
     setTransactionId("");
     setReference("");
     setNotes("");
     setProofFile(null);
     await load();
+  };
+
+  const handleSubmitIssue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenant) return;
+
+    if (!issueSubject.trim() || !issueDetails.trim()) {
+      setError("Please enter a subject and details");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setMsg(null);
+
+    let photoUrl: string | null = null;
+    if (issuePhoto) {
+      const path = `issues/${tenant.id}/${Date.now()}-${issuePhoto.name.replace(
+        /[^a-zA-Z0-9._-]/g,
+        "_"
+      )}`;
+      const { error: upErr } = await supabase.storage
+        .from("payment-proofs")
+        .upload(path, issuePhoto, { upsert: true });
+      if (!upErr) {
+        const { data: pub } = supabase.storage
+          .from("payment-proofs")
+          .getPublicUrl(path);
+        photoUrl = pub.publicUrl;
+      }
+    }
+
+    // Optional: store in DB if table exists (ignore error if not)
+    try {
+      await supabase.from("tenant_issues").insert({
+        tenant_id: tenant.id,
+        category: issueCategory,
+        subject: issueSubject.trim(),
+        details: issueDetails.trim(),
+        photo_url: photoUrl,
+        status: "open",
+      });
+    } catch {
+      /* table may not exist yet */
+    }
+
+    try {
+      const landlordEmail = await getLandlordEmail(tenant.landlord_id);
+      await supabase.functions.invoke("send-email", {
+        body: {
+          to: landlordEmail,
+          subject: `Tenant issue: ${issueCategory} – ${tenant.full_name}`,
+          html: `<p>Hello,</p>
+<p>A tenant reported an issue that needs your attention.</p>
+<ul>
+  <li><strong>Tenant:</strong> ${tenant.full_name}</li>
+  <li><strong>Phone:</strong> ${tenant.phone || "—"}</li>
+  <li><strong>Property:</strong> ${houseLabel()}</li>
+  <li><strong>Category:</strong> ${issueCategory}</li>
+  <li><strong>Subject:</strong> ${issueSubject.trim()}</li>
+</ul>
+<p><strong>Details:</strong></p>
+<p>${issueDetails.trim().replace(/\n/g, "<br/>")}</p>
+${
+  photoUrl
+    ? `<p><a href="${photoUrl}">View attached photo</a></p>`
+    : ""
+}
+<p>Please follow up with the tenant.</p>
+<p>Rentozi Rentals</p>`,
+          text: `Issue from ${tenant.full_name} (${houseLabel()}): ${issueCategory} – ${issueSubject}. ${issueDetails}`,
+        },
+      });
+    } catch (err) {
+      setSubmitting(false);
+      setError("Could not send email. Try again or contact the landlord directly.");
+      return;
+    }
+
+    setSubmitting(false);
+    setMsg("Issue sent to your landlord by email. Thank you.");
+    setIssueSubject("");
+    setIssueDetails("");
+    setIssuePhoto(null);
+    setTab("home");
   };
 
   const handleLogout = async () => {
@@ -280,17 +367,14 @@ export default function TenantPortalPage() {
   const monthsAdv = Number(balance?.months_in_advance || 0);
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b">
+    <div className="min-h-screen bg-slate-50 pb-20">
+      <header className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
           <div>
             <p className="text-xs text-slate-500">Welcome</p>
             <p className="font-bold text-slate-900">{tenant?.full_name}</p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-slate-500"
-          >
+          <button onClick={handleLogout} className="text-sm text-slate-500">
             Logout
           </button>
         </div>
@@ -306,125 +390,114 @@ export default function TenantPortalPage() {
           </p>
         )}
 
-        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="font-bold text-lg">
-                {house?.name || "Property"}
-              </p>
-              <p className="text-xs text-slate-500">{house?.code}</p>
-            </div>
-            <span
-              className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                status === "paid"
-                  ? "bg-emerald-100 text-emerald-800"
-                  : status === "overdue"
-                  ? "bg-red-100 text-red-800"
-                  : "bg-sky-100 text-sky-800"
-              }`}
-            >
-              {status.toUpperCase()}
-            </span>
-          </div>
-
-          <div className="text-xs text-slate-500 uppercase font-semibold">
-            Paid months
-          </div>
-          <p className="text-sm font-medium">
-            {getPaidMonths(balance?.next_due_date, monthsAdv)}
-          </p>
-
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div>
-              <p className="text-xs text-slate-500">Next due date</p>
-              <p className="font-semibold">
-                {balance?.next_due_date || "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Outstanding</p>
-              <p className="font-semibold text-red-600">
-                {formatMK(Number(balance?.current_balance || 0))}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Monthly rent</p>
-              <p className="font-semibold">
-                {formatMK(Number(house?.monthly_rent || 0))}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Advance required</p>
-              <p className="font-semibold">
-                {monthsAdv} / {advanceRequired} months
-              </p>
-            </div>
-          </div>
-
-          {house?.bank_account && (
-            <p className="text-xs text-slate-500">
-              Pay to account: <strong>{house.bank_account}</strong>
-              <br />
-              Airtel Money: 0995684682 · Mpamba: 0888381177
-            </p>
-          )}
-        </div>
-
-        <Link
-          href="/tenant/lease"
-          className="block w-full text-center border-2 border-emerald-600 text-emerald-800 font-semibold py-3 rounded-xl"
-        >
-          View / sign lease
-        </Link>
-
-        <button
-          onClick={() => {
-            setShowPay(true);
-            setMsg(null);
-            setError(null);
-          }}
-          className="w-full bg-emerald-600 text-white font-semibold py-3 rounded-xl"
-        >
-          Make Payment
-        </button>
-
-        <div className="bg-white rounded-2xl border shadow-sm p-4">
-          <h2 className="font-bold mb-3">Payment History</h2>
-          {payments.length === 0 ? (
-            <p className="text-sm text-slate-500">No payments recorded yet</p>
-          ) : (
-            <ul className="space-y-2">
-              {payments.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex justify-between items-center text-sm border-b border-slate-50 pb-2"
+        {tab === "home" && (
+          <>
+            <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-bold text-lg">{house?.name || "Property"}</p>
+                  <p className="text-xs text-slate-500">{house?.code}</p>
+                </div>
+                <span
+                  className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                    status === "paid"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : status === "overdue"
+                      ? "bg-red-100 text-red-800"
+                      : "bg-sky-100 text-sky-800"
+                  }`}
                 >
-                  <div>
-                    <p className="font-semibold">{formatMK(Number(p.amount))}</p>
-                    <p className="text-xs text-slate-500">
-                      {p.method} · {p.paid_date}
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
-                    CONFIRMED
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </main>
+                  {status.toUpperCase()}
+                </span>
+              </div>
 
-      {showPay && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4">
+              <div className="text-xs text-slate-500 uppercase font-semibold">
+                Paid months
+              </div>
+              <p className="text-sm font-medium">
+                {getPaidMonths(balance?.next_due_date, monthsAdv)}
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p className="text-xs text-slate-500">Next due date</p>
+                  <p className="font-semibold">{balance?.next_due_date || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Outstanding</p>
+                  <p className="font-semibold text-red-600">
+                    {formatMK(Number(balance?.current_balance || 0))}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Monthly rent</p>
+                  <p className="font-semibold">
+                    {formatMK(Number(house?.monthly_rent || 0))}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Advance required</p>
+                  <p className="font-semibold">
+                    {monthsAdv} / {advanceRequired} months
+                  </p>
+                </div>
+              </div>
+
+              {house?.bank_account && (
+                <p className="text-xs text-slate-500">
+                  Pay to account: <strong>{house.bank_account}</strong>
+                  <br />
+                  Airtel Money: 0995684682 · Mpamba: 0888381177
+                </p>
+              )}
+            </div>
+
+            <Link
+              href="/tenant/lease"
+              className="block w-full text-center border-2 border-emerald-600 text-emerald-800 font-semibold py-3 rounded-xl"
+            >
+              View / sign lease
+            </Link>
+
+            <div className="bg-white rounded-2xl border shadow-sm p-4">
+              <h2 className="font-bold mb-3">Payment History</h2>
+              {payments.length === 0 ? (
+                <p className="text-sm text-slate-500">No payments recorded yet</p>
+              ) : (
+                <ul className="space-y-2">
+                  {payments.map((p) => (
+                    <li
+                      key={p.id}
+                      className="flex justify-between items-center text-sm border-b border-slate-50 pb-2"
+                    >
+                      <div>
+                        <p className="font-semibold">
+                          {formatMK(Number(p.amount))}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {p.method} · {p.paid_date}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
+                        CONFIRMED
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+
+        {tab === "pay" && (
           <form
             onSubmit={handleSubmitPayment}
-            className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
           >
             <h3 className="font-bold text-lg">Report a payment</h3>
             <p className="text-xs text-slate-500">
-              After you pay via bank or mobile money, submit the details here.
-              Your landlord will get an email and confirm the payment.
+              After you pay, submit details here. Your landlord gets an email to
+              confirm.
             </p>
 
             <div>
@@ -439,7 +512,6 @@ export default function TenantPortalPage() {
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
               />
             </div>
-
             <div>
               <label className="text-xs font-semibold text-slate-500">
                 Method
@@ -455,7 +527,6 @@ export default function TenantPortalPage() {
                 <option>Cash</option>
               </select>
             </div>
-
             <div>
               <label className="text-xs font-semibold text-slate-500">
                 Date paid
@@ -467,7 +538,6 @@ export default function TenantPortalPage() {
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
               />
             </div>
-
             <div>
               <label className="text-xs font-semibold text-slate-500">
                 Transaction ID
@@ -479,7 +549,6 @@ export default function TenantPortalPage() {
                 placeholder="From SMS or bank alert"
               />
             </div>
-
             <div>
               <label className="text-xs font-semibold text-slate-500">
                 Reference (optional)
@@ -490,10 +559,9 @@ export default function TenantPortalPage() {
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
               />
             </div>
-
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Screenshot / proof (optional)
+                Screenshot / proof
               </label>
               <input
                 type="file"
@@ -502,11 +570,8 @@ export default function TenantPortalPage() {
                 className="w-full text-sm mt-1"
               />
             </div>
-
             <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Notes
-              </label>
+              <label className="text-xs font-semibold text-slate-500">Notes</label>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -514,26 +579,135 @@ export default function TenantPortalPage() {
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
               />
             </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Submit payment report"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowPay(false)}
-                className="px-4 text-slate-500 text-sm"
-              >
-                Cancel
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+            >
+              {submitting ? "Submitting..." : "Submit payment report"}
+            </button>
           </form>
+        )}
+
+        {tab === "issues" && (
+          <form
+            onSubmit={handleSubmitIssue}
+            className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
+          >
+            <h3 className="font-bold text-lg">Report an issue</h3>
+            <p className="text-xs text-slate-500">
+              Describe the problem. An email is sent to your landlord right away.
+            </p>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Category
+              </label>
+              <select
+                value={issueCategory}
+                onChange={(e) => setIssueCategory(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+              >
+                <option>Maintenance</option>
+                <option>Plumbing</option>
+                <option>Electrical</option>
+                <option>Security</option>
+                <option>Noise / neighbour</option>
+                <option>Rent / payment query</option>
+                <option>Other</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Subject
+              </label>
+              <input
+                required
+                value={issueSubject}
+                onChange={(e) => setIssueSubject(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                placeholder="Short title, e.g. Leaking tap"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Details
+              </label>
+              <textarea
+                required
+                value={issueDetails}
+                onChange={(e) => setIssueDetails(e.target.value)}
+                rows={5}
+                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                placeholder="What happened, when, and how urgent is it?"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Photo (optional)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setIssuePhoto(e.target.files?.[0] || null)}
+                className="w-full text-sm mt-1"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full bg-amber-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+            >
+              {submitting ? "Sending..." : "Send issue to landlord"}
+            </button>
+          </form>
+        )}
+      </main>
+
+      {/* Bottom tabs */}
+      <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-40">
+        <div className="max-w-lg mx-auto grid grid-cols-3 text-xs">
+          <button
+            onClick={() => {
+              setTab("home");
+              setError(null);
+            }}
+            className={`py-3 font-semibold ${
+              tab === "home" ? "text-emerald-700" : "text-slate-500"
+            }`}
+          >
+            Home
+          </button>
+          <button
+            onClick={() => {
+              setTab("pay");
+              setError(null);
+              setMsg(null);
+            }}
+            className={`py-3 font-semibold ${
+              tab === "pay" ? "text-emerald-700" : "text-slate-500"
+            }`}
+          >
+            Pay
+          </button>
+          <button
+            onClick={() => {
+              setTab("issues");
+              setError(null);
+              setMsg(null);
+            }}
+            className={`py-3 font-semibold ${
+              tab === "issues" ? "text-amber-700" : "text-slate-500"
+            }`}
+          >
+            Issues
+          </button>
         </div>
-      )}
+      </nav>
     </div>
   );
 }
