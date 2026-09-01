@@ -8,7 +8,11 @@ import Link from "next/link";
 const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
-
+  const isOwner = userEmail.toLowerCase() === "ctenthani@gmail.com";
+  const [newLlName, setNewLlName] = useState("");
+  const [newLlBiz, setNewLlBiz] = useState("");
+  const [newLlEmail, setNewLlEmail] = useState("");
+  const [newLlPass, setNewLlPass] = useState("123456");
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -124,6 +128,48 @@ export default function SettingsPage() {
     else setMsg("Settings saved");
   };
 
+          {isOwner && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setSaving(true);
+              setError(null);
+              const { data, error: fnErr } = await supabase.functions.invoke(
+                "create-new-landlord",
+                {
+                  body: {
+                    email: newLlEmail.trim(),
+                    password: newLlPass,
+                    full_name: newLlName,
+                    business_name: newLlBiz,
+                  },
+                }
+              );
+              setSaving(false);
+              if (fnErr || data?.error) {
+                setError(fnErr?.message || data?.error);
+                return;
+              }
+              setMsg(`New landlord created: ${newLlEmail}`);
+              setNewLlEmail("");
+              setNewLlName("");
+              setNewLlBiz("");
+            }}
+            className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
+          >
+            <h2 className="font-bold text-lg">Create new landlord</h2>
+            <p className="text-xs text-slate-500">
+              Platform owner only. Creates a separate empty business.
+            </p>
+            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Landlord name" value={newLlName} onChange={(e) => setNewLlName(e.target.value)} />
+            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Business name" value={newLlBiz} onChange={(e) => setNewLlBiz(e.target.value)} />
+            <input required type="email" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Login email" value={newLlEmail} onChange={(e) => setNewLlEmail(e.target.value)} />
+            <input required className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Password (min 6)" value={newLlPass} onChange={(e) => setNewLlPass(e.target.value)} />
+            <button className="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-semibold">
+              Create landlord
+            </button>
+          </form>
+        )}
   const addManager = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!landlordId) return;
