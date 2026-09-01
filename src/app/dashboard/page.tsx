@@ -52,12 +52,15 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<any[]>([]);
   const [userEmail, setUserEmail] = useState("");
+  const [businessName, setBusinessName] = useState("My Rentals");
+  const [landlordName, setLandlordName] = useState("");
+  const [isAlsoTenant, setIsAlsoTenant] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
   const [loginPassword, setLoginPassword] = useState("123456");
+  const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({
     house_name: "",
     house_code: "",
@@ -81,46 +84,67 @@ export default function DashboardPage() {
     }
     setUserEmail(session.user.email || "");
 
-    const { data: isTenant } = await supabase
+    const { data: tenantRow } = await supabase
       .from("tenants")
       .select("id")
       .eq("auth_user_id", session.user.id)
       .maybeSingle();
-    if (isTenant) {
-      router.push("/tenant");
-      return;
-    }
 
     let landlordId: string | null = null;
+
     const { data: landlord } = await supabase
       .from("landlords")
-      .select("id")
+      .select("id, full_name, business_name, email")
       .eq("auth_user_id", session.user.id)
       .maybeSingle();
+
     if (landlord) {
       landlordId = landlord.id;
+      setBusinessName(
+        landlord.business_name || landlord.full_name || "My Rentals"
+      );
+      setLandlordName(landlord.full_name || "");
     } else {
       const { data: mem } = await supabase
         .from("landlord_members")
         .select("landlord_id")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
-      if (mem) landlordId = mem.landlord_id;
+      if (mem) {
+        landlordId = mem.landlord_id;
+        const { data: ll } = await supabase
+          .from("landlords")
+          .select("id, full_name, business_name")
+          .eq("id", mem.landlord_id)
+          .maybeSingle();
+        if (ll) {
+          setBusinessName(ll.business_name || ll.full_name || "My Rentals");
+          setLandlordName(ll.full_name || "");
+        }
+      }
     }
 
-   if (!landlordId) {
-  const { data: createdId, error: createErr } =
-    await supabase.rpc("create_landlord_profile");
-  if (!createErr && createdId) {
-    landlordId = createdId;
-  } else {
-    setError(
-      createErr?.message || "No landlord profile linked to this account"
-    );
-    setLoading(false);
-    return;
-  }
-}
+    if (!landlordId && tenantRow) {
+      router.push("/tenant");
+      return;
+    }
+
+    if (!landlordId) {
+      const { data: createdId, error: createErr } = await supabase.rpc(
+        "create_landlord_profile"
+      );
+      if (!createErr && createdId) {
+        landlordId = createdId as string;
+      } else {
+        setError(
+          createErr?.message || "No landlord profile linked to this account"
+        );
+        setLoading(false);
+        return;
+      }
+    }
+
+    setIsAlsoTenant(!!tenantRow);
 
     const { data: tenants } = await supabase
       .from("tenants")
@@ -239,7 +263,7 @@ export default function DashboardPage() {
     await loadData();
   };
 
-   const handleCreateLogin = async () => {
+  const handleCreateLogin = async () => {
     if (!editing?.email) {
       setError("Set tenant email first");
       return;
@@ -248,10 +272,8 @@ export default function DashboardPage() {
       setError("Password must be at least 6 characters");
       return;
     }
-
     setSaving(true);
     setError(null);
-
     const { data, error: fnErr } = await supabase.functions.invoke(
       "create-tenant-user",
       {
@@ -263,35 +285,29 @@ export default function DashboardPage() {
         },
       }
     );
-
     setSaving(false);
-
     if (fnErr) {
-      setError(fnErr.message || "Edge Function error");
+      setError(fnErr.message);
       return;
     }
     if (data?.error) {
       setError(data.error);
       return;
     }
-
     await supabase.functions.invoke("send-email", {
       body: {
         to: editing.email.trim(),
-        subject: "Your Rentozi tenant login",
+        subject: `Your ${businessName} tenant login`,
         html: `<p>Hello ${editing.full_name},</p>
 <p>Your tenant portal is ready.</p>
-<p><strong>Login:</strong> <a href="https://rentozi.netlify.app/auth/login">https://rentozi.netlify.app/auth/login</a><br/>
-<strong>Email:</strong> ${editing.email}<br/>
-<strong>Temporary password:</strong> ${loginPassword}</p>
-<p>Please change your password after first login.</p>
-<p>Thank you.<br/>Chifundo and Wezzie Tenthani<br/>Rentozi Rentals</p>`,
-        text: `Login: https://rentozi.netlify.app/auth/login Email: ${editing.email} Password: ${loginPassword}`,
+<p>Login: <a href="https://rentozi.netlify.app/auth/login">https://rentozi.netlify.app/auth/login</a><br/>
+Email: ${editing.email}<br/>
+Password: ${loginPassword}</p>
+<p>${businessName}</p>`,
+        text: `Login https://rentozi.netlify.app/auth/login Email: ${editing.email} Password: ${loginPassword}`,
       },
     });
-
     alert(`Login created. Password: ${loginPassword}`);
-    setLoginPassword("123456");
     await loadData();
   };
 
@@ -299,7 +315,6 @@ export default function DashboardPage() {
     e.preventDefault();
     setSaving(true);
     setError(null);
-
     const { error: rpcErr } = await supabase.rpc("landlord_add_property", {
       p_house_name: addForm.house_name,
       p_house_code: addForm.house_code,
@@ -309,14 +324,11 @@ export default function DashboardPage() {
       p_phone: addForm.phone,
       p_email: addForm.email || null,
     });
-
     setSaving(false);
-
     if (rpcErr) {
       setError(rpcErr.message);
       return;
     }
-
     setShowAdd(false);
     setAddForm({
       house_name: "",
@@ -357,9 +369,10 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between h-14 gap-2">
             <div>
               <p className="font-bold text-slate-900 text-sm sm:text-base">
-                Chifundo and Wezzie
+                {businessName}
               </p>
-              <p className="text-[11px] text-slate-500 truncate max-w-[180px]">
+              <p className="text-[11px] text-slate-500 truncate max-w-[220px]">
+                {landlordName ? `${landlordName} · ` : ""}
                 {userEmail}
               </p>
             </div>
@@ -370,6 +383,14 @@ export default function DashboardPage() {
               >
                 Dashboard
               </Link>
+              {isAlsoTenant && (
+                <Link
+                  href="/tenant"
+                  className="px-2.5 py-1.5 rounded-lg bg-sky-100 text-sky-900 font-semibold"
+                >
+                  Tenant view
+                </Link>
+              )}
               <Link
                 href="/pending"
                 className={`px-2.5 py-1.5 rounded-lg font-semibold relative ${
@@ -421,33 +442,21 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-sm">
-            <p className="text-[11px] uppercase text-slate-500 font-semibold">
-              Expected
-            </p>
-            <p className="text-lg font-bold text-emerald-700">
-              {formatMK(totals.expected)}
-            </p>
+            <p className="text-[11px] uppercase text-slate-500 font-semibold">Expected</p>
+            <p className="text-lg font-bold text-emerald-700">{formatMK(totals.expected)}</p>
           </div>
           <div className="bg-white rounded-2xl border border-rose-100 p-4 shadow-sm">
-            <p className="text-[11px] uppercase text-slate-500 font-semibold">
-              Outstanding
-            </p>
-            <p className="text-lg font-bold text-rose-600">
-              {formatMK(totals.outstanding)}
-            </p>
+            <p className="text-[11px] uppercase text-slate-500 font-semibold">Outstanding</p>
+            <p className="text-lg font-bold text-rose-600">{formatMK(totals.outstanding)}</p>
           </div>
           <div className="bg-white rounded-2xl border border-sky-100 p-4 shadow-sm">
-            <p className="text-[11px] uppercase text-slate-500 font-semibold">
-              Paid / Overdue
-            </p>
+            <p className="text-[11px] uppercase text-slate-500 font-semibold">Paid / Overdue</p>
             <p className="text-lg font-bold text-slate-800">
               {totals.paid} / {totals.overdue}
             </p>
           </div>
           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-            <p className="text-[11px] uppercase text-slate-500 font-semibold">
-              Properties
-            </p>
+            <p className="text-[11px] uppercase text-slate-500 font-semibold">Properties</p>
             <p className="text-lg font-bold text-slate-800">{rows.length}</p>
           </div>
         </div>
@@ -464,18 +473,6 @@ export default function DashboardPage() {
 
         <div className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-x-auto">
           <table className="w-full text-left text-xs table-fixed min-w-[900px]">
-            <colgroup>
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "14%" }} />
-              <col style={{ width: "9%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "9%" }} />
-              <col style={{ width: "8%" }} />
-              <col style={{ width: "8%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "10%" }} />
-            </colgroup>
             <thead className="bg-emerald-50 text-emerald-900">
               <tr>
                 <th className="px-2 py-2">House</th>
@@ -492,15 +489,10 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-t border-slate-100 hover:bg-slate-50"
-                >
+                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-2 py-2 font-medium">
                     {r.house_code}
-                    <div className="text-[10px] text-slate-400 truncate">
-                      {r.house_name}
-                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">{r.house_name}</div>
                   </td>
                   <td className="px-2 py-2">
                     <div className="truncate font-medium">{r.full_name}</div>
@@ -510,9 +502,7 @@ export default function DashboardPage() {
                   <td className="px-2 py-2">{r.next_due_date || "—"}</td>
                   <td className="px-2 py-2 text-[11px]">
                     {getPaidMonths(r.next_due_date, r.months_in_advance)}
-                    <div className="text-slate-400">
-                      {r.months_in_advance} mo adv
-                    </div>
+                    <div className="text-slate-400">{r.months_in_advance} mo adv</div>
                   </td>
                   <td className="px-2 py-2 font-semibold text-rose-600">
                     {formatMK(r.current_balance)}
@@ -520,12 +510,8 @@ export default function DashboardPage() {
                   <td className="px-2 py-2">
                     <StatusBadge status={r.status} />
                   </td>
-                  <td className="px-2 py-2 text-[10px]">
-                    {r.bank_account || "—"}
-                  </td>
-                  <td className="px-2 py-2">
-                    {r.auth_user_id ? "Yes" : "No"}
-                  </td>
+                  <td className="px-2 py-2 text-[10px]">{r.bank_account || "—"}</td>
+                  <td className="px-2 py-2">{r.auth_user_id ? "Yes" : "No"}</td>
                   <td className="px-2 py-2 space-x-1 whitespace-nowrap">
                     <button
                       onClick={() => setEditing({ ...r })}
@@ -551,92 +537,27 @@ export default function DashboardPage() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg p-5 space-y-3 max-h-[90vh] overflow-y-auto">
             <h3 className="font-bold text-lg">Edit property</h3>
-
+            {[
+              ["Tenant name", "full_name"],
+              ["Phone", "phone"],
+              ["Email", "email"],
+              ["House name", "house_name"],
+              ["House code", "house_code"],
+              ["Monthly rent (MK)", "monthly_rent"],
+              ["Bank account", "bank_account"],
+            ].map(([label, key]) => (
+              <div key={key}>
+                <label className="text-xs font-semibold text-slate-500">{label}</label>
+                <input
+                  type={key === "monthly_rent" ? "number" : "text"}
+                  className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
+                  value={editing[key] || ""}
+                  onChange={(e) => setEditing({ ...editing, [key]: e.target.value })}
+                />
+              </div>
+            ))}
             <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Tenant name
-              </label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.full_name}
-                onChange={(e) =>
-                  setEditing({ ...editing, full_name: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Phone</label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.phone || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, phone: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Email</label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.email || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, email: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                House name
-              </label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.house_name}
-                onChange={(e) =>
-                  setEditing({ ...editing, house_name: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                House code
-              </label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.house_code}
-                onChange={(e) =>
-                  setEditing({ ...editing, house_code: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Monthly rent (MK)
-              </label>
-              <input
-                type="number"
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.monthly_rent}
-                onChange={(e) =>
-                  setEditing({ ...editing, monthly_rent: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Bank account
-              </label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={editing.bank_account || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, bank_account: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Next due date
-              </label>
+              <label className="text-xs font-semibold text-slate-500">Next due date</label>
               <input
                 type="date"
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
@@ -655,27 +576,19 @@ export default function DashboardPage() {
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
                 value={editing.months_in_advance}
                 onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    months_in_advance: e.target.value,
-                  })
+                  setEditing({ ...editing, months_in_advance: e.target.value })
                 }
               />
             </div>
-                        <div className="border-t pt-3 mt-2">
+            <div className="border-t pt-3">
               <label className="text-xs font-semibold text-slate-500">
                 Default password for Create login (min 6 characters)
               </label>
               <input
-                type="text"
                 className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="123456"
               />
-              <p className="text-[11px] text-slate-400 mt-1">
-                Tenant will receive this password by email.
-              </p>
             </div>
             <div className="flex flex-wrap gap-2 pt-2">
               <button
@@ -716,93 +629,60 @@ export default function DashboardPage() {
             className="bg-white rounded-2xl w-full max-w-lg p-5 space-y-3"
           >
             <h3 className="font-bold text-lg">Add property</h3>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                House name
-              </label>
-              <input
-                required
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={addForm.house_name}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, house_name: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                House code
-              </label>
-              <input
-                required
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                placeholder="e.g. H13"
-                value={addForm.house_code}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, house_code: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Monthly rent (MK)
-              </label>
-              <input
-                required
-                type="number"
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={addForm.monthly_rent}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, monthly_rent: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Bank account
-              </label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={addForm.bank_account}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, bank_account: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Tenant full name
-              </label>
-              <input
-                required
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={addForm.tenant_name}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, tenant_name: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Phone</label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={addForm.phone}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, phone: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Email</label>
-              <input
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                value={addForm.email}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, email: e.target.value })
-                }
-              />
-            </div>
-            <div className="flex gap-2 pt-2">
+            <input
+              required
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="House name"
+              value={addForm.house_name}
+              onChange={(e) => setAddForm({ ...addForm, house_name: e.target.value })}
+            />
+            <input
+              required
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="House code"
+              value={addForm.house_code}
+              onChange={(e) => setAddForm({ ...addForm, house_code: e.target.value })}
+            />
+            <input
+              required
+              type="number"
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Monthly rent"
+              value={addForm.monthly_rent}
+              onChange={(e) =>
+                setAddForm({ ...addForm, monthly_rent: e.target.value })
+              }
+            />
+            <input
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Bank account"
+              value={addForm.bank_account}
+              onChange={(e) =>
+                setAddForm({ ...addForm, bank_account: e.target.value })
+              }
+            />
+            <input
+              required
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Tenant full name"
+              value={addForm.tenant_name}
+              onChange={(e) =>
+                setAddForm({ ...addForm, tenant_name: e.target.value })
+              }
+            />
+            <input
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Phone"
+              value={addForm.phone}
+              onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
+            />
+            <input
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Email"
+              value={addForm.email}
+              onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
+            />
+            <div className="flex gap-2">
               <button
                 type="submit"
                 disabled={saving}
