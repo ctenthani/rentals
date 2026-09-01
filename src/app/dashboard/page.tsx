@@ -333,23 +333,28 @@ Password: ${loginPassword}</p>
     setError(null);
     
     const FREE_PROPERTIES = 2;
-if (rows.length >= FREE_PROPERTIES) {
-  const { data: ll } = await supabase
-    .from("landlords")
-    .select("plan, plan_paid_until")
-    .eq("id", /* landlordId */)
-    .maybeSingle();
-  const paid =
-    ll?.plan === "paid" &&
-    ll?.plan_paid_until &&
-    new Date(ll.plan_paid_until) >= new Date();
-  if (!paid) {
-    setError(
-      `Free plan allows ${FREE_PROPERTIES} properties. Pay MK 4,999 per extra property in Settings.`
-    );
-    return;
-  }
-}
+    if (rows.length >= 2) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const { data: ll } = await supabase
+        .from("landlords")
+        .select("plan, plan_paid_until, paid_extras")
+        .eq("auth_user_id", session?.user.id || "")
+        .maybeSingle();
+      const paidOk =
+        ll?.plan === "paid" &&
+        ll?.plan_paid_until &&
+        new Date(ll.plan_paid_until) >= new Date() &&
+        rows.length < 2 + Number(ll.paid_extras || 0);
+      if (!paidOk) {
+        setSaving(false);
+        setError(
+          "Free plan includes 2 properties. Pay MK 3,999 per extra property per month in Settings (40% off for 12+ months)."
+        );
+        return;
+      }
+    }
     const { error: rpcErr } = await supabase.rpc("landlord_add_property", {
       p_house_name: addForm.house_name,
       p_house_code: addForm.house_code,
