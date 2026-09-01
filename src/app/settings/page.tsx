@@ -10,459 +10,186 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 export default function SettingsPage() {
-  const [accountEmail, setAccountEmail] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [landlordId, setLandlordId] = useState<string | null>(null);
   const [fullName, setFullName] = useState("");
   const [businessName, setBusinessName] = useState("");
-  const [plan, setPlan] = useState("free");
-  const [maxTenants, setMaxTenants] = useState(1);
-  const [tenantCount, setTenantCount] = useState(0);
-  const [isOwner, setIsOwner] = useState(false);
-  const [landlordId, setLandlordId] = useState<string | null>(null);
-  const [members, setMembers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [profileMsg, setProfileMsg] = useState<string | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
-
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [savingPassword, setSavingPassword] = useState(false);
-  const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviting, setInviting] = useState(false);
-  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [airtel, setAirtel] = useState("");
+  const [mpamba, setMpamba] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccount, setBankAccount] = useState("");
+  const [notes, setNotes] = useState("");
 
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   useEffect(() => {
-    async function init() {
+    async function load() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
       if (!session) {
         router.push("/auth/login");
         return;
       }
 
-      setAccountEmail(session.user.email || "");
-
-      const { data: tenantCheck } = await supabase
-        .from("tenants")
-        .select("id")
+      const { data: ll } = await supabase
+        .from("landlords")
+        .select("*")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
 
-      if (tenantCheck) {
-        router.push("/tenant");
+      if (!ll) {
+        setError("No landlord profile");
+        setLoading(false);
         return;
       }
 
-      const { data: landlord } = await supabase
-        .from("landlords")
-        .select("id, full_name, business_name, plan, max_tenants")
-        .eq("auth_user_id", session.user.id)
-        .maybeSingle();
-
-      if (landlord) {
-        setIsOwner(true);
-        setLandlordId(landlord.id);
-        setFullName(landlord.full_name || "");
-        setBusinessName(landlord.business_name || "");
-        setPlan(landlord.plan || "free");
-        setMaxTenants(landlord.max_tenants ?? 1);
-
-        const { count } = await supabase
-          .from("tenants")
-          .select("id", { count: "exact", head: true })
-          .eq("landlord_id", landlord.id);
-        setTenantCount(count || 0);
-
-        const { data: mem } = await supabase
-          .from("landlord_members")
-          .select("id, email, role, auth_user_id")
-          .eq("landlord_id", landlord.id);
-        setMembers(mem || []);
-      } else {
-        const { data: membership } = await supabase
-          .from("landlord_members")
-          .select(
-            "landlord_id, landlords(id, full_name, business_name, plan, max_tenants)"
-          )
-          .eq("auth_user_id", session.user.id)
-          .maybeSingle();
-
-        if (membership?.landlords) {
-          const L = Array.isArray(membership.landlords)
-            ? membership.landlords[0]
-            : membership.landlords;
-          const lid = (L as any)?.id || membership.landlord_id;
-          setIsOwner(false);
-          setLandlordId(lid);
-          setFullName((L as any)?.full_name || "");
-          setBusinessName((L as any)?.business_name || "");
-          setPlan((L as any)?.plan || "free");
-          setMaxTenants((L as any)?.max_tenants ?? 1);
-
-          const { count } = await supabase
-            .from("tenants")
-            .select("id", { count: "exact", head: true })
-            .eq("landlord_id", lid);
-          setTenantCount(count || 0);
-        }
-      }
-
+      setLandlordId(ll.id);
+      setFullName(ll.full_name || "");
+      setBusinessName(ll.business_name || "");
+      setEmail(ll.email || session.user.email || "");
+      setAirtel(ll.airtel_number || "");
+      setMpamba(ll.mpamba_number || "");
+      setBankName(ll.bank_name || "");
+      setBankAccount(ll.bank_account || "");
+      setNotes(ll.payment_notes || "");
       setLoading(false);
     }
-
-    init();
+    load();
   }, [router]);
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isOwner) return;
+    if (!landlordId) return;
+    setSaving(true);
+    setError(null);
+    setMsg(null);
 
-    setSavingProfile(true);
-    setProfileMsg(null);
-    setProfileError(null);
+    const { error: uErr } = await supabase
+      .from("landlords")
+      .update({
+        full_name: fullName,
+        business_name: businessName,
+        email,
+        airtel_number: airtel || null,
+        mpamba_number: mpamba || null,
+        bank_name: bankName || null,
+        bank_account: bankAccount || null,
+        payment_notes: notes || null,
+      })
+      .eq("id", landlordId);
 
-    const { data, error } = await supabase.rpc("update_landlord_profile", {
-      p_full_name: fullName,
-      p_business_name: businessName,
-    });
-
-    if (error) setProfileError(error.message);
-    else if (data?.success === false)
-      setProfileError(data.error || "Update failed");
-    else setProfileMsg("Profile saved");
-
-    setSavingProfile(false);
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password !== confirm) {
-      setPasswordError("Passwords do not match");
+    setSaving(false);
+    if (uErr) {
+      setError(uErr.message);
       return;
     }
-    if (password.length < 6) {
-      setPasswordError("Password must be at least 6 characters");
-      return;
-    }
-
-    setSavingPassword(true);
-    setPasswordError(null);
-    setPasswordMsg(null);
-
-    const { error } = await supabase.auth.updateUser({ password });
-
-    if (error) setPasswordError(error.message);
-    else {
-      setPasswordMsg("Password updated");
-      setPassword("");
-      setConfirm("");
-    }
-    setSavingPassword(false);
-  };
-
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isOwner) return;
-
-    setInviting(true);
-    setInviteMsg(null);
-
-    const { data, error } = await supabase.rpc("invite_landlord_member", {
-      p_email: inviteEmail.trim(),
-    });
-
-    if (error) setInviteMsg("Error: " + error.message);
-    else if (data?.success === false)
-      setInviteMsg("Error: " + (data.error || "Invite failed"));
-    else {
-      setInviteMsg("Member added. They can sign in and manage this account.");
-      setInviteEmail("");
-
-      if (landlordId) {
-        const { data: mem } = await supabase
-          .from("landlord_members")
-          .select("id, email, role, auth_user_id")
-          .eq("landlord_id", landlordId);
-        setMembers(mem || []);
-      }
-    }
-
-    setInviting(false);
+    setMsg("Settings saved. Tenants will see these pay-to numbers.");
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-slate-500 text-sm">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-slate-500">Loading settings...</p>
       </div>
     );
   }
 
-  const isPro = plan === "pro";
-
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b sticky top-0 z-40">
+      <header className="bg-white border-b">
         <div className="max-w-lg mx-auto px-4 h-14 flex items-center gap-4">
-          <Link href="/dashboard" className="text-slate-600 text-sm">
+          <Link href="/dashboard" className="text-sm text-slate-600">
             ← Dashboard
           </Link>
-          <h1 className="font-semibold text-slate-900">Settings</h1>
+          <p className="font-bold">Settings</p>
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 py-8 space-y-6">
-        {/* Account */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-            Signed in as
-          </p>
-          <p className="font-medium text-slate-900 mt-1">{accountEmail}</p>
-          <p className="text-xs text-slate-500 mt-1">
-            {isOwner ? "Account owner" : "Co-manager"}
-          </p>
-        </div>
-
-        {/* Subscription */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-semibold text-slate-900">Subscription</h2>
-              <p className="text-sm text-slate-700 mt-2">
-                Plan:{" "}
-                <span
-                  className={`font-semibold capitalize ${
-                    isPro ? "text-emerald-700" : "text-slate-800"
-                  }`}
-                >
-                  {plan || "free"}
-                </span>
-              </p>
-              <p className="text-xs text-slate-500 mt-1">
-                {tenantCount} / {maxTenants === 500 ? "∞" : maxTenants} tenants
-                used
-              </p>
-            </div>
-            <span
-              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
-                isPro
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-slate-100 text-slate-600"
-              }`}
-            >
-              {isPro ? "PRO" : "FREE"}
-            </span>
-          </div>
-
-          {isPro ? (
-            <p className="text-xs text-emerald-700 bg-emerald-50 rounded-xl p-3 mt-4">
-              Pro plan — you can add many properties.
-            </p>
-          ) : (
-            <div className="mt-4 space-y-2">
-              <p className="text-xs text-slate-600 bg-slate-50 rounded-xl p-3">
-                Free plan includes <strong>1 tenant</strong>. Upgrade to Pro to
-                manage more properties.
-              </p>
-              <p className="text-xs text-slate-500">
-                To upgrade, contact the app owner. After payment your account
-                will be switched to Pro.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Profile */}
-        <form
-          onSubmit={handleSaveProfile}
-          className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4"
-        >
-          <h2 className="font-semibold text-slate-900">Landlord profile</h2>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Full name
-            </label>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              disabled={!isOwner}
-              required
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm disabled:bg-slate-50"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Business / company name
-            </label>
-            <input
-              type="text"
-              value={businessName}
-              onChange={(e) => setBusinessName(e.target.value)}
-              disabled={!isOwner}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm disabled:bg-slate-50"
-            />
-          </div>
-
-          {profileError && (
-            <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
-              {profileError}
-            </p>
-          )}
-          {profileMsg && (
-            <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">
-              {profileMsg}
-            </p>
-          )}
-
-          {isOwner && (
-            <button
-              type="submit"
-              disabled={savingProfile}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium py-2.5 rounded-xl text-sm"
-            >
-              {savingProfile ? "Saving..." : "Save profile"}
-            </button>
-          )}
-        </form>
-
-        {/* Password */}
-        <form
-          onSubmit={handleChangePassword}
-          className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4"
-        >
-          <h2 className="font-semibold text-slate-900">Change password</h2>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              New password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Confirm password
-            </label>
-            <input
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-              minLength={6}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-            />
-          </div>
-
-          {passwordError && (
-            <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
-              {passwordError}
-            </p>
-          )}
-          {passwordMsg && (
-            <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">
-              {passwordMsg}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={savingPassword}
-            className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-medium py-2.5 rounded-xl text-sm"
-          >
-            {savingPassword ? "Updating..." : "Update password"}
-          </button>
-        </form>
-
-        {/* Team (owner only) */}
-        {isOwner && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-            <h2 className="font-semibold text-slate-900">Team access</h2>
-            <p className="text-xs text-slate-500">
-              Invite someone who has already signed up. They will see the same
-              properties as you.
-            </p>
-
-            {members.length > 0 && (
-              <ul className="space-y-2">
-                {members.map((m) => (
-                  <li
-                    key={m.id}
-                    className="flex justify-between items-center text-sm border border-slate-100 rounded-xl px-3 py-2"
-                  >
-                    <span className="text-slate-800">
-                      {m.email || m.auth_user_id}
-                    </span>
-                    <span className="text-xs text-slate-500 capitalize">
-                      {m.role}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <form onSubmit={handleInvite} className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Co-manager email
-                </label>
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  required
-                  placeholder="colleague@gmail.com"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                />
-              </div>
-
-              {inviteMsg && (
-                <p
-                  className={`text-sm p-3 rounded-xl ${
-                    inviteMsg.startsWith("Error")
-                      ? "text-red-600 bg-red-50"
-                      : "text-emerald-700 bg-emerald-50"
-                  }`}
-                >
-                  {inviteMsg}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={inviting}
-                className="w-full border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50 font-medium py-2.5 rounded-xl text-sm"
-              >
-                {inviting ? "Inviting..." : "Add co-manager"}
-              </button>
-            </form>
-          </div>
+      <form
+        onSubmit={save}
+        className="max-w-lg mx-auto p-4 space-y-4"
+      >
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>
+        )}
+        {msg && (
+          <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>
         )}
 
-        <p className="text-center text-xs text-slate-400 pb-8">
-          <Link href="/auth/forgot-password" className="text-green-700">
-            Forgot password
-          </Link>
-          {" · "}
-          <Link href="/dashboard" className="text-green-700">
-            Back to dashboard
-          </Link>
-        </p>
-      </main>
+        <div className="bg-white rounded-2xl border p-4 space-y-3">
+          <h2 className="font-bold">Business</h2>
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Full name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+          />
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Business / company name"
+            value={businessName}
+            onChange={(e) => setBusinessName(e.target.value)}
+          />
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Email for notifications"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+
+        <div className="bg-white rounded-2xl border p-4 space-y-3">
+          <h2 className="font-bold">How tenants should pay you</h2>
+          <p className="text-xs text-slate-500">
+            Leave blank any method you do not use. These appear on the tenant portal.
+          </p>
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Bank name (e.g. National Bank)"
+            value={bankName}
+            onChange={(e) => setBankName(e.target.value)}
+          />
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Bank account number"
+            value={bankAccount}
+            onChange={(e) => setBankAccount(e.target.value)}
+          />
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Airtel Money number"
+            value={airtel}
+            onChange={(e) => setAirtel(e.target.value)}
+          />
+          <input
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="TNM Mpamba number"
+            value={mpamba}
+            onChange={(e) => setMpamba(e.target.value)}
+          />
+          <textarea
+            className="w-full border rounded-xl px-3 py-2 text-sm"
+            placeholder="Extra notes (account name, reference format)"
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold"
+        >
+          {saving ? "Saving..." : "Save settings"}
+        </button>
+      </form>
     </div>
   );
 }
