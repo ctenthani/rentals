@@ -315,6 +315,25 @@ Password: ${loginPassword}</p>
     e.preventDefault();
     setSaving(true);
     setError(null);
+    
+    const FREE_PROPERTIES = 2;
+if (rows.length >= FREE_PROPERTIES) {
+  const { data: ll } = await supabase
+    .from("landlords")
+    .select("plan, plan_paid_until")
+    .eq("id", /* landlordId */)
+    .maybeSingle();
+  const paid =
+    ll?.plan === "paid" &&
+    ll?.plan_paid_until &&
+    new Date(ll.plan_paid_until) >= new Date();
+  if (!paid) {
+    setError(
+      `Free plan allows ${FREE_PROPERTIES} properties. Pay MK 4,999 per extra property in Settings.`
+    );
+    return;
+  }
+}
     const { error: rpcErr } = await supabase.rpc("landlord_add_property", {
       p_house_name: addForm.house_name,
       p_house_code: addForm.house_code,
