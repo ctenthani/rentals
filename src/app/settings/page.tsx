@@ -12,7 +12,8 @@ const SUPABASE_ANON_KEY =
 const FREE_PROPERTIES = 2;
 const EXTRA_MONTH = 4999;
 const EXTRA_YEAR = Math.round(EXTRA_MONTH * 12 * 0.6);
-
+const [payMonths, setPayMonths] = useState(1);
+const [payExtras, setPayExtras] = useState(1);
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   const [userEmail, setUserEmail] = useState("");
   const [landlordId, setLandlordId] = useState<string | null>(null);
   const [propertyCount, setPropertyCount] = useState(0);
+  setPayExtras(Math.max(propertyCount - 2, 1));
   const [fullName, setFullName] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [notifyEmail, setNotifyEmail] = useState("");
@@ -139,42 +141,75 @@ export default function SettingsPage() {
   if (loading) return <div className="min-h-screen flex items-center justify-center"><p className="text-slate-500">Loading settings...</p></div>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50">
-      <header className="bg-white border-b sticky top-0 z-30">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href="/dashboard" className="text-sm text-slate-600">← Dashboard</Link>
-          <p className="font-bold">Settings</p>
-          <p className="text-[11px] text-slate-400 truncate max-w-[140px]">{userEmail}</p>
-        </div>
-      </header>
-      <div className="max-w-2xl mx-auto p-4 space-y-4">
-        {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
-        {msg && <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>}
-
-        <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+    <        <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
           <h2 className="font-bold text-lg">Plan</h2>
-          <p className="text-sm">{propertyCount} properties · first {FREE_PROPERTIES} free</p>
-          {planUntil && <p className="text-xs text-slate-500">Paid until {planUntil}</p>}
-          {extras === 0 ? (
-            <p className="text-sm text-emerald-700">You are on the free plan.</p>
-          ) : (
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div className="border rounded-xl p-3">
-                <p className="text-xs uppercase text-slate-500 font-semibold">Monthly</p>
-                <p className="font-bold">MK {(extras * EXTRA_MONTH).toLocaleString()}</p>
-                <p className="text-[11px] text-slate-500">MK {EXTRA_MONTH.toLocaleString()} × {extras}</p>
-                <button type="button" onClick={() => startPaypal("monthly")} className="mt-2 w-full bg-[#0070ba] text-white py-2 rounded-xl text-sm">Pay monthly</button>
-              </div>
-              <div className="border-2 border-emerald-400 rounded-xl p-3 bg-emerald-50">
-                <p className="text-xs uppercase text-emerald-800 font-semibold">Annual · 40% off</p>
-                <p className="font-bold">MK {(extras * EXTRA_YEAR).toLocaleString()}</p>
-                <p className="text-[11px] text-slate-500 line-through">MK {(extras * EXTRA_MONTH * 12).toLocaleString()}</p>
-                <button type="button" onClick={() => startPaypal("annual")} className="mt-2 w-full bg-emerald-600 text-white py-2 rounded-xl text-sm">Pay yearly</button>
-              </div>
-            </div>
+          <p className="text-sm">
+            {propertyCount} properties · first 2 free · extra MK 3,999 / month each
+          </p>
+          {planUntil && (
+            <p className="text-xs text-slate-500">Paid until {planUntil}</p>
           )}
-        </section>
 
+          <label className="block text-xs font-semibold text-slate-500">
+            Extra properties to cover
+            <input
+              type="number"
+              min={1}
+              max={50}
+              className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
+              value={payExtras}
+              onChange={(e) => setPayExtras(Math.max(1, Number(e.target.value)))}
+            />
+          </label>
+          <label className="block text-xs font-semibold text-slate-500">
+            Number of months
+            <input
+              type="number"
+              min={1}
+              max={36}
+              className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
+              value={payMonths}
+              onChange={(e) => setPayMonths(Math.max(1, Number(e.target.value)))}
+            />
+          </label>
+
+          {payMonths >= 12 && (
+            <p className="text-sm text-emerald-700 font-semibold">40% discount applied (12+ months)</p>
+          )}
+
+          <p className="text-lg font-bold">
+            MK{" "}
+            {(
+              Math.round(3999 * payMonths * (payMonths >= 12 ? 0.6 : 1)) * payExtras
+            ).toLocaleString()}
+          </p>
+          {payMonths >= 12 && (
+            <p className="text-xs text-slate-400 line-through">
+              MK {(3999 * payMonths * payExtras).toLocaleString()}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={async () => {
+              setSaving(true);
+              setError(null);
+              const { data, error: fnErr } = await supabase.functions.invoke(
+                "create-paypal-order",
+                { body: { months: payMonths, extras: payExtras } }
+              );
+              setSaving(false);
+              if (fnErr || data?.error) {
+                setError(fnErr?.message || data?.error);
+                return;
+              }
+              window.location.href = data.approval_url;
+            }}
+            className="w-full bg-[#0070ba] text-white py-2.5 rounded-xl text-sm font-semibold"
+          >
+            Pay with PayPal or card
+          </button>
+        </section>
         <form onSubmit={saveProfile} className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
           <h2 className="font-bold text-lg">Business</h2>
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Your name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
