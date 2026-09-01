@@ -92,36 +92,49 @@ export default function DashboardPage() {
 
     let landlordId: string | null = null;
 
-    const { data: landlord } = await supabase
-      .from("landlords")
-      .select("id, full_name, business_name, email")
+       const { data: mem } = await supabase
+      .from("landlord_members")
+      .select("landlord_id, role")
       .eq("auth_user_id", session.user.id)
       .maybeSingle();
 
-    if (landlord) {
-      landlordId = landlord.id;
-      setBusinessName(
-        landlord.business_name || landlord.full_name || "My Rentals"
-      );
-      setLandlordName(landlord.full_name || "");
+    let landlordId: string | null = mem?.landlord_id || null;
+
+    if (landlordId) {
+      const { data: ll } = await supabase
+        .from("landlords")
+        .select("id, full_name, business_name, email")
+        .eq("id", landlordId)
+        .maybeSingle();
+      if (ll) {
+        setBusinessName(ll.business_name || ll.full_name || "My Rentals");
+        setLandlordName(ll.full_name || "");
+      }
     } else {
-      const { data: mem } = await supabase
-        .from("landlord_members")
-        .select("landlord_id")
+      const { data: landlord } = await supabase
+        .from("landlords")
+        .select("id, full_name, business_name, email")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
-      if (mem) {
-        landlordId = mem.landlord_id;
-        const { data: ll } = await supabase
-          .from("landlords")
-          .select("id, full_name, business_name")
-          .eq("id", mem.landlord_id)
-          .maybeSingle();
-        if (ll) {
-          setBusinessName(ll.business_name || ll.full_name || "My Rentals");
-          setLandlordName(ll.full_name || "");
-        }
+      if (landlord) {
+        landlordId = landlord.id;
+        setBusinessName(landlord.business_name || landlord.full_name || "My Rentals");
+        setLandlordName(landlord.full_name || "");
       }
+    }
+
+    // Only brand-new users create a landlord. Never do this for co-managers.
+    if (!landlordId) {
+      const { data: createdId, error: createErr } = await supabase.rpc(
+        "create_landlord_profile"
+      );
+      if (!createErr && createdId) landlordId = createdId as string;
+    }
+
+    if (!landlordId) {
+      setError("No landlord profile linked to this account");
+      setLoading(false);
+      return;
     }
 
     if (!landlordId && tenantRow) {
