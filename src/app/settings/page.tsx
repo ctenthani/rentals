@@ -9,6 +9,10 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
+const FREE_PROPERTIES = 2;
+const EXTRA_PRICE = 4999;
+const DEFAULT_PAYPAL = "https://www.paypal.com/paypalme/ctenthani";
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -16,6 +20,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState("");
   const [landlordId, setLandlordId] = useState<string | null>(null);
+  const [propertyCount, setPropertyCount] = useState(0);
 
   const [fullName, setFullName] = useState("");
   const [businessName, setBusinessName] = useState("");
@@ -25,17 +30,24 @@ export default function SettingsPage() {
   const [bankName, setBankName] = useState("");
   const [bankAccount, setBankAccount] = useState("");
   const [notes, setNotes] = useState("");
-  const [accent, setAccent] = useState("#059669");
+  const [paypalLink, setPaypalLink] = useState(DEFAULT_PAYPAL);
+  const [plan, setPlan] = useState("free");
+  const [planUntil, setPlanUntil] = useState<string | null>(null);
 
   const [members, setMembers] = useState<any[]>([]);
-  const [newManagerEmail, setNewManagerEmail] = useState("");
-  const [newManagerPassword, setNewManagerPassword] = useState("123456");
+  const [mgrName, setMgrName] = useState("");
+  const [mgrEmail, setMgrEmail] = useState("");
+  const [mgrPass, setMgrPass] = useState("123456");
 
   const [newPass, setNewPass] = useState("");
   const [newPass2, setNewPass2] = useState("");
+  const [deleteTyped, setDeleteTyped] = useState("");
 
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const extras = Math.max(propertyCount - FREE_PROPERTIES, 0);
+  const monthlyDue = extras * EXTRA_PRICE;
 
   async function load() {
     const {
@@ -47,14 +59,14 @@ export default function SettingsPage() {
     }
     setUserEmail(session.user.email || "");
 
-    const { data: ll } = await supabase
+    let ll: any = null;
+    const { data: own } = await supabase
       .from("landlords")
       .select("*")
       .eq("auth_user_id", session.user.id)
       .maybeSingle();
-
-    let lid = ll?.id || null;
-    if (!lid) {
+    ll = own;
+    if (!ll) {
       const { data: mem } = await supabase
         .from("landlord_members")
         .select("landlord_id")
@@ -66,40 +78,40 @@ export default function SettingsPage() {
           .select("*")
           .eq("id", mem.landlord_id)
           .maybeSingle();
-        if (owner) {
-          lid = owner.id;
-          applyLandlord(owner);
-        }
+        ll = owner;
       }
-    } else {
-      applyLandlord(ll);
     }
-
-    if (!lid) {
+    if (!ll) {
       setError("No landlord profile");
       setLoading(false);
       return;
     }
-    setLandlordId(lid);
 
-    const { data: mems } = await supabase
-      .from("landlord_members")
-      .select("id, email, role, auth_user_id")
-      .eq("landlord_id", lid);
-    setMembers(mems || []);
-    setLoading(false);
-  }
-
-  function applyLandlord(ll: any) {
+    setLandlordId(ll.id);
     setFullName(ll.full_name || "");
     setBusinessName(ll.business_name || "");
-    setNotifyEmail(ll.email || "");
+    setNotifyEmail(ll.email || session.user.email || "");
     setAirtel(ll.airtel_number || "");
     setMpamba(ll.mpamba_number || "");
     setBankName(ll.bank_name || "");
     setBankAccount(ll.bank_account || "");
     setNotes(ll.payment_notes || "");
-    setAccent(ll.accent_color || "#059669");
+    setPaypalLink(ll.paypal_link || DEFAULT_PAYPAL);
+    setPlan(ll.plan || "free");
+    setPlanUntil(ll.plan_paid_until || null);
+
+    const { count } = await supabase
+      .from("tenants")
+      .select("id", { count: "exact", head: true })
+      .eq("landlord_id", ll.id);
+    setPropertyCount(count || 0);
+
+    const { data: mems } = await supabase
+      .from("landlord_members")
+      .select("id, email, role, auth_user_id")
+      .eq("landlord_id", ll.id);
+    setMembers(mems || []);
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -111,7 +123,6 @@ export default function SettingsPage() {
     if (!landlordId) return;
     setSaving(true);
     setError(null);
-    setMsg(null);
     const { error: uErr } = await supabase
       .from("landlords")
       .update({
@@ -123,66 +134,43 @@ export default function SettingsPage() {
         bank_name: bankName || null,
         bank_account: bankAccount || null,
         payment_notes: notes || null,
-        accent_color: accent,
+        paypal_link: paypalLink,
       })
       .eq("id", landlordId);
     setSaving(false);
-    if (uErr) {
-      setError(uErr.message);
-      return;
-    }
-    setMsg("Settings saved");
+    if (uErr) setError(uErr.message);
+    else setMsg("Saved");
   };
 
   const addManager = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!landlordId || !newManagerEmail.trim()) return;
-    if (newManagerPassword.length < 6) {
-      setError("Manager password must be at least 6 characters");
-      return;
-    }
+    if (!landlordId) return;
     setSaving(true);
     setError(null);
     setMsg(null);
-
     const { data, error: fnErr } = await supabase.functions.invoke(
-      "create-tenant-user",
+      "create-manager",
       {
         body: {
-          email: newManagerEmail.trim(),
-          password: newManagerPassword,
-          tenant_id: null,
-          full_name: "Manager",
-          as_manager: true,
+          email: mgrEmail.trim(),
+          password: mgrPass,
           landlord_id: landlordId,
+          full_name: mgrName || "Manager",
         },
       }
     );
-
-    // Fallback: if function does not support managers, tell user to create Auth user then paste UID
-    if (fnErr || data?.error) {
-      setSaving(false);
-      setError(
-        "Could not auto-create manager. Create the user in Authentication, then run the SQL at the bottom of this page with their UID."
-      );
+    setSaving(false);
+    if (fnErr) {
+      setError(fnErr.message);
       return;
     }
-
-    const uid = data?.user_id;
-    if (uid) {
-      await supabase.from("landlord_members").insert({
-        landlord_id: landlordId,
-        auth_user_id: uid,
-        email: newManagerEmail.trim(),
-        role: "manager",
-      });
+    if (data?.error) {
+      setError(data.error);
+      return;
     }
-
-    setSaving(false);
-    setMsg(
-      `Manager added. They sign in with ${newManagerEmail} / ${newManagerPassword}`
-    );
-    setNewManagerEmail("");
+    setMsg(`Manager ready. They log in with ${mgrEmail} / ${mgrPass}`);
+    setMgrEmail("");
+    setMgrName("");
     await load();
   };
 
@@ -194,249 +182,160 @@ export default function SettingsPage() {
 
   const changePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPass.length < 6) {
-      setError("Password must be at least 6 characters");
-      return;
-    }
-    if (newPass !== newPass2) {
-      setError("Passwords do not match");
+    if (newPass.length < 6 || newPass !== newPass2) {
+      setError("Passwords must match and be at least 6 characters");
       return;
     }
     const { error: pErr } = await supabase.auth.updateUser({ password: newPass });
-    if (pErr) {
-      setError(pErr.message);
+    if (pErr) setError(pErr.message);
+    else {
+      setNewPass("");
+      setNewPass2("");
+      setMsg("Password changed");
+    }
+  };
+
+  const deleteAccount = async () => {
+    if (deleteTyped !== "DELETE") {
+      setError('Type DELETE to confirm');
       return;
     }
-    setNewPass("");
-    setNewPass2("");
-    setMsg("Password changed");
+    if (!confirm("This permanently deletes your account and properties.")) return;
+    const { data, error: fnErr } = await supabase.functions.invoke(
+      "delete-landlord-account"
+    );
+    if (fnErr || data?.error) {
+      setError(fnErr?.message || data?.error);
+      return;
+    }
+    await supabase.auth.signOut();
+    router.push("/auth/login");
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center">
         <p className="text-slate-500">Loading settings...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/40 to-sky-50">
-      <header className="bg-white/90 border-b sticky top-0 z-30">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50">
+      <header className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link href="/dashboard" className="text-sm text-slate-600">
             ← Dashboard
           </Link>
           <p className="font-bold">Settings</p>
-          <p className="text-[11px] text-slate-400 truncate max-w-[140px]">
-            {userEmail}
-          </p>
+          <p className="text-[11px] text-slate-400 truncate max-w-[140px]">{userEmail}</p>
         </div>
       </header>
 
       <div className="max-w-2xl mx-auto p-4 space-y-4">
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>
-        )}
-        {msg && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">
-            {msg}
-          </p>
-        )}
+        {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+        {msg && <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>}
 
-        <form
-          onSubmit={saveProfile}
-          className="bg-white rounded-2xl border shadow-sm p-5 space-y-4"
-        >
-          <h2 className="font-bold text-lg">Business profile</h2>
-          <p className="text-xs text-slate-500">
-            Shown on the dashboard header, receipts, and leases.
+        <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-2">
+          <h2 className="font-bold text-lg">Plan</h2>
+          <p className="text-sm">
+            {propertyCount} propert{propertyCount === 1 ? "y" : "ies"} · first {FREE_PROPERTIES} free
           </p>
-          <label className="block text-xs font-semibold text-slate-500">
-            Your name
-            <input
-              className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs font-semibold text-slate-500">
-            Business / company name
-            <input
-              className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
-              value={businessName}
-              onChange={(e) => setBusinessName(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs font-semibold text-slate-500">
-            Notification email
-            <input
-              className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
-              value={notifyEmail}
-              onChange={(e) => setNotifyEmail(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs font-semibold text-slate-500">
-            Accent colour
-            <input
-              type="color"
-              className="mt-1 h-10 w-20 border rounded-lg"
-              value={accent}
-              onChange={(e) => setAccent(e.target.value)}
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={saving}
-            className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold"
-          >
-            {saving ? "Saving..." : "Save profile"}
-          </button>
-        </form>
-
-        <form
-          onSubmit={saveProfile}
-          className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
-        >
-          <h2 className="font-bold text-lg">How tenants pay you</h2>
-          <p className="text-xs text-slate-500">
-            Leave blank any method you do not use. Tenants only see what you fill in.
-          </p>
-          <input
-            className="w-full border rounded-xl px-3 py-2 text-sm"
-            placeholder="Bank name"
-            value={bankName}
-            onChange={(e) => setBankName(e.target.value)}
-          />
-          <input
-            className="w-full border rounded-xl px-3 py-2 text-sm"
-            placeholder="Bank account number"
-            value={bankAccount}
-            onChange={(e) => setBankAccount(e.target.value)}
-          />
-          <input
-            className="w-full border rounded-xl px-3 py-2 text-sm"
-            placeholder="Airtel Money number"
-            value={airtel}
-            onChange={(e) => setAirtel(e.target.value)}
-          />
-          <input
-            className="w-full border rounded-xl px-3 py-2 text-sm"
-            placeholder="TNM Mpamba number"
-            value={mpamba}
-            onChange={(e) => setMpamba(e.target.value)}
-          />
-          <textarea
-            className="w-full border rounded-xl px-3 py-2 text-sm"
-            placeholder="Notes (account name, what reference to use)"
-            rows={3}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={saving}
-            className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold"
-          >
-            Save payment details
-          </button>
-        </form>
-
-        <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
-          <h2 className="font-bold text-lg">Managers</h2>
-          <p className="text-xs text-slate-500">
-            Extra people who can open this same landlord dashboard (spouse,
-            caretaker, agent). They use their own email and password.
-          </p>
-
-          {members.length === 0 ? (
-            <p className="text-sm text-slate-400">No extra managers yet.</p>
+          {extras === 0 ? (
+            <p className="text-sm text-emerald-700">You are on the free plan.</p>
           ) : (
-            <ul className="space-y-2">
-              {members.map((m) => (
-                <li
-                  key={m.id}
-                  className="flex items-center justify-between text-sm border rounded-xl px-3 py-2"
-                >
-                  <span>
-                    {m.email || m.auth_user_id}
-                    <span className="ml-2 text-[10px] uppercase text-slate-400">
-                      {m.role || "manager"}
-                    </span>
-                  </span>
-                  <button
-                    onClick={() => removeManager(m.id)}
-                    className="text-red-600 text-xs"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className="text-sm">
+                {extras} extra × MK {EXTRA_PRICE.toLocaleString()} ={" "}
+                <strong>MK {monthlyDue.toLocaleString()} / month</strong>
+              </p>
+              {planUntil && (
+                <p className="text-xs text-slate-500">Paid until {planUntil}</p>
+              )}
+              <a
+                href={`${paypalLink}${paypalLink.includes("?") ? "&" : "?"}amount=${monthlyDue}&currency_code=USD`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block bg-[#0070ba] text-white px-4 py-2.5 rounded-xl text-sm font-semibold"
+              >
+                Pay with PayPal or card
+              </a>
+              <p className="text-[11px] text-slate-500">
+                PayPal checkout accepts PayPal balance and debit/credit cards.
+                After you pay, email the receipt to {notifyEmail || userEmail} so the plan can be marked paid.
+              </p>
+            </>
           )}
+        </section>
 
-          <form onSubmit={addManager} className="space-y-2 pt-2">
-            <input
-              type="email"
-              required
-              placeholder="Manager email"
-              value={newManagerEmail}
-              onChange={(e) => setNewManagerEmail(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Temporary password (min 6)"
-              value={newManagerPassword}
-              onChange={(e) => setNewManagerPassword(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={saving}
-              className="border border-emerald-300 text-emerald-800 px-4 py-2 rounded-xl text-sm font-semibold"
-            >
-              Add manager
+        <form onSubmit={saveProfile} className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+          <h2 className="font-bold text-lg">Business</h2>
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Your name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Notification email" value={notifyEmail} onChange={(e) => setNotifyEmail(e.target.value)} />
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Your PayPal.me link" value={paypalLink} onChange={(e) => setPaypalLink(e.target.value)} />
+          <button className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">Save</button>
+        </form>
+
+        <form onSubmit={saveProfile} className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+          <h2 className="font-bold text-lg">Tenant pay-to details</h2>
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Bank name" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Bank account" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} />
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Airtel Money" value={airtel} onChange={(e) => setAirtel(e.target.value)} />
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="TNM Mpamba" value={mpamba} onChange={(e) => setMpamba(e.target.value)} />
+          <textarea className="w-full border rounded-xl px-3 py-2 text-sm" rows={2} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <button className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">Save payment details</button>
+        </form>
+
+        <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+          <h2 className="font-bold text-lg">Co-managers</h2>
+          <p className="text-xs text-slate-500">
+            They get their own email + password and see this same dashboard.
+          </p>
+          {members.map((m) => (
+            <div key={m.id} className="flex justify-between text-sm border rounded-xl px-3 py-2">
+              <span>{m.email} · {m.role}</span>
+              <button type="button" onClick={() => removeManager(m.id)} className="text-red-600 text-xs">
+                Remove
+              </button>
+            </div>
+          ))}
+          <form onSubmit={addManager} className="space-y-2">
+            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Manager name" value={mgrName} onChange={(e) => setMgrName(e.target.value)} />
+            <input required type="email" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Manager email" value={mgrEmail} onChange={(e) => setMgrEmail(e.target.value)} />
+            <input required className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Password (min 6)" value={mgrPass} onChange={(e) => setMgrPass(e.target.value)} />
+            <button disabled={saving} className="border border-emerald-300 text-emerald-800 px-4 py-2 rounded-xl text-sm font-semibold">
+              {saving ? "Adding..." : "Add co-manager"}
             </button>
           </form>
+        </section>
 
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            Manual fallback: Authentication → Add user → copy UID, then in SQL:
-            <br />
-            <code>
-              INSERT INTO landlord_members (landlord_id, auth_user_id, email,
-              role) VALUES (&apos;{landlordId}&apos;,
-              &apos;PASTE-UID&apos;, &apos;email@example.com&apos;,
-              &apos;manager&apos;);
-            </code>
+        <form onSubmit={changePassword} className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+          <h2 className="font-bold text-lg">Change password</h2>
+          <input type="password" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="New password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
+          <input type="password" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Confirm password" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} />
+          <button className="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-semibold">Update password</button>
+        </form>
+
+        <section className="bg-white rounded-2xl border border-red-200 p-5 space-y-3">
+          <h2 className="font-bold text-lg text-red-700">Delete account</h2>
+          <p className="text-xs text-slate-500">
+            Permanently removes this landlord profile, properties, tenants and the login.
           </p>
-        </div>
-
-        <form
-          onSubmit={changePassword}
-          className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
-        >
-          <h2 className="font-bold text-lg">Change your password</h2>
           <input
-            type="password"
-            placeholder="New password"
-            value={newPass}
-            onChange={(e) => setNewPass(e.target.value)}
-            className="w-full border rounded-xl px-3 py-2 text-sm"
-          />
-          <input
-            type="password"
-            placeholder="Confirm new password"
-            value={newPass2}
-            onChange={(e) => setNewPass2(e.target.value)}
-            className="w-full border rounded-xl px-3 py-2 text-sm"
+            className="w-full border border-red-200 rounded-xl px-3 py-2 text-sm"
+            placeholder='Type DELETE'
+            value={deleteTyped}
+            onChange={(e) => setDeleteTyped(e.target.value)}
           />
           <button
-            type="submit"
-            className="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-semibold"
+            type="button"
+            onClick={deleteAccount}
+            className="bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-semibold"
           >
-            Update password
+            Delete my account
           </button>
-        </form>
+        </section>
       </div>
     </div>
   );
