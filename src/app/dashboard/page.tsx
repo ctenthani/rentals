@@ -108,11 +108,19 @@ export default function DashboardPage() {
       if (mem) landlordId = mem.landlord_id;
     }
 
-    if (!landlordId) {
-      setError("No landlord profile linked to this account");
-      setLoading(false);
-      return;
-    }
+   if (!landlordId) {
+  const { data: createdId, error: createErr } =
+    await supabase.rpc("create_landlord_profile");
+  if (!createErr && createdId) {
+    landlordId = createdId;
+  } else {
+    setError(
+      createErr?.message || "No landlord profile linked to this account"
+    );
+    setLoading(false);
+    return;
+  }
+}
 
     const { data: tenants } = await supabase
       .from("tenants")
