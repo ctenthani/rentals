@@ -128,7 +128,23 @@ export default function DashboardPage() {
       router.push("/tenant");
       return;
     }
-
+    if (rows.length >= 2) {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: ll } = await supabase
+        .from("landlords")
+        .select("plan, plan_paid_until")
+        .eq("auth_user_id", session?.user.id || "")
+        .maybeSingle();
+      const paid =
+        ll?.plan === "paid" &&
+        ll?.plan_paid_until &&
+        new Date(ll.plan_paid_until) >= new Date();
+      if (!paid) {
+        setSaving(false);
+        setError("Free plan includes 2 properties. Extra properties are MK 4,999/month or MK 35,993/year (40% off) in Settings.");
+        return;
+      }
+    }
     if (!landlordId) {
       const { data: createdId, error: createErr } = await supabase.rpc(
         "create_landlord_profile"
