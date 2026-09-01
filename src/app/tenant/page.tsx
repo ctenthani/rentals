@@ -27,9 +27,7 @@ function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number) {
   const count = Math.max(Number(monthsInAdvance) || 1, 1);
   const months: string[] = [];
   for (let i = 0; i < count; i++) {
-    months.unshift(
-      d.toLocaleString("en", { month: "short", year: "numeric" })
-    );
+    months.unshift(d.toLocaleString("en", { month: "short", year: "numeric" }));
     d.setMonth(d.getMonth() - 1);
   }
   return months.join(", ");
@@ -44,22 +42,20 @@ export default function TenantPortalPage() {
   const [tenant, setTenant] = useState<any>(null);
   const [balance, setBalance] = useState<any>(null);
   const [house, setHouse] = useState<any>(null);
+  const [payInfo, setPayInfo] = useState<any>(null);
+  const [isAlsoLandlord, setIsAlsoLandlord] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
   const [tab, setTab] = useState<Tab>("home");
   const [submitting, setSubmitting] = useState(false);
 
-  // Payment form
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("Bank Transfer");
-  const [paidDate, setPaidDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
   const [transactionId, setTransactionId] = useState("");
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
 
-  // Issue form
   const [issueCategory, setIssueCategory] = useState("Maintenance");
   const [issueSubject, setIssueSubject] = useState("");
   const [issueDetails, setIssueDetails] = useState("");
@@ -76,6 +72,13 @@ export default function TenantPortalPage() {
       router.push("/auth/login");
       return;
     }
+
+    const { data: llCheck } = await supabase
+      .from("landlords")
+      .select("id")
+      .eq("auth_user_id", session.user.id)
+      .maybeSingle();
+    setIsAlsoLandlord(!!llCheck);
 
     const { data: t, error: tErr } = await supabase
       .from("tenants")
@@ -96,6 +99,17 @@ export default function TenantPortalPage() {
     setTenant(t);
     setHouse(h || null);
 
+    if (t.landlord_id) {
+      const { data: ll } = await supabase
+        .from("landlords")
+        .select(
+          "email, business_name, full_name, airtel_number, mpamba_number, bank_name, bank_account, payment_notes"
+        )
+        .eq("id", t.landlord_id)
+        .maybeSingle();
+      setPayInfo(ll);
+    }
+
     const { data: bal } = await supabase
       .from("tenant_balances")
       .select("*")
@@ -110,26 +124,12 @@ export default function TenantPortalPage() {
       .order("paid_date", { ascending: false })
       .limit(20);
     setPayments(pays || []);
-
     setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, [router]);
-
-  const advanceRequired = (() => {
-    const name = (tenant?.full_name || "").toLowerCase();
-    if (
-      name.includes("lipanda") ||
-      name.includes("chison") ||
-      name.includes("emily") ||
-      name.includes("mphande")
-    ) {
-      return 3;
-    }
-    return 2;
-  })();
 
   const getLandlordEmail = async (landlordId: string | null) => {
     if (landlordId) {
@@ -140,47 +140,15 @@ export default function TenantPortalPage() {
         .maybeSingle();
       if (ll?.email) return ll.email as string;
     }
-    return "ctenthani@gmail.com";
+    return payInfo?.email || null;
   };
 
   const houseLabel = () =>
     house ? `${house.name} (${house.code})` : "property";
 
-  const notifyLandlordPayment = async (payload: {
-    fullName: string;
-    landlordId: string | null;
-    amount: number;
-    method: string;
-    txn: string;
-  }) => {
-    try {
-      const landlordEmail = await getLandlordEmail(payload.landlordId);
-      await supabase.functions.invoke("send-email", {
-        body: {
-          to: landlordEmail,
-          subject: `Payment pending confirmation – ${payload.fullName}`,
-          html: `<p>Hello,</p>
-<p><strong>${payload.fullName}</strong> submitted a rent payment that needs your confirmation.</p>
-<ul>
-  <li><strong>Property:</strong> ${houseLabel()}</li>
-  <li><strong>Amount:</strong> MK ${Number(payload.amount).toLocaleString()}</li>
-  <li><strong>Method:</strong> ${payload.method}</li>
-  <li><strong>Txn / Ref:</strong> ${payload.txn || "—"}</li>
-</ul>
-<p><a href="https://rentozi.netlify.app/pending"><strong>Open Pending payments</strong></a></p>
-<p>Rentozi Rentals</p>`,
-          text: `${payload.fullName} submitted a payment. Confirm: https://rentozi.netlify.app/pending`,
-        },
-      });
-    } catch (e) {
-      console.log("Landlord payment notify failed", e);
-    }
-  };
-
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
-
     const amt = Number(amount);
     if (!amt || amt <= 0) {
       setError("Enter a valid amount");
@@ -233,18 +201,22 @@ export default function TenantPortalPage() {
       return;
     }
 
-    await notifyLandlordPayment({
-      fullName: tenant.full_name,
-      landlordId: tenant.landlord_id,
-      amount: amt,
-      method,
-      txn: transactionId.trim() || reference.trim(),
-    });
+    const to = await getLandlordEmail(tenant.landlord_id);
+    if (to) {
+      await supabase.functions.invoke("send-email", {
+        body: {
+          to,
+          subject: `Payment pending confirmation – ${tenant.full_name}`,
+          html: `<p><strong>${tenant.full_name}</strong> submitted a payment for ${houseLabel()}.</p>
+<p>Amount: MK ${amt.toLocaleString()} · ${method} · ${transactionId || reference}</p>
+<p><a href="https://rentozi.netlify.app/pending">Open Pending</a></p>`,
+          text: `${tenant.full_name} submitted a payment. Confirm on Pending.`,
+        },
+      });
+    }
 
     setSubmitting(false);
-    setMsg(
-      "Payment report submitted. Your landlord has been notified by email."
-    );
+    setMsg("Payment report submitted. Your landlord has been notified.");
     setTab("home");
     setAmount("");
     setTransactionId("");
@@ -256,13 +228,10 @@ export default function TenantPortalPage() {
 
   const handleSubmitIssue = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
-
-    if (!issueSubject.trim() || !issueDetails.trim()) {
-      setError("Please enter a subject and details");
+    if (!tenant || !issueSubject.trim() || !issueDetails.trim()) {
+      setError("Enter a subject and details");
       return;
     }
-
     setSubmitting(true);
     setError(null);
     setMsg(null);
@@ -284,7 +253,6 @@ export default function TenantPortalPage() {
       }
     }
 
-    // Optional: store in DB if table exists (ignore error if not)
     try {
       await supabase.from("tenant_issues").insert({
         tenant_id: tenant.id,
@@ -295,44 +263,26 @@ export default function TenantPortalPage() {
         status: "open",
       });
     } catch {
-      /* table may not exist yet */
+      /* optional table */
     }
 
-    try {
-      const landlordEmail = await getLandlordEmail(tenant.landlord_id);
+    const to = await getLandlordEmail(tenant.landlord_id);
+    if (to) {
       await supabase.functions.invoke("send-email", {
         body: {
-          to: landlordEmail,
+          to,
           subject: `Tenant issue: ${issueCategory} – ${tenant.full_name}`,
-          html: `<p>Hello,</p>
-<p>A tenant reported an issue that needs your attention.</p>
-<ul>
-  <li><strong>Tenant:</strong> ${tenant.full_name}</li>
-  <li><strong>Phone:</strong> ${tenant.phone || "—"}</li>
-  <li><strong>Property:</strong> ${houseLabel()}</li>
-  <li><strong>Category:</strong> ${issueCategory}</li>
-  <li><strong>Subject:</strong> ${issueSubject.trim()}</li>
-</ul>
-<p><strong>Details:</strong></p>
-<p>${issueDetails.trim().replace(/\n/g, "<br/>")}</p>
-${
-  photoUrl
-    ? `<p><a href="${photoUrl}">View attached photo</a></p>`
-    : ""
-}
-<p>Please follow up with the tenant.</p>
-<p>Rentozi Rentals</p>`,
-          text: `Issue from ${tenant.full_name} (${houseLabel()}): ${issueCategory} – ${issueSubject}. ${issueDetails}`,
+          html: `<p>${tenant.full_name} (${houseLabel()})</p>
+<p><strong>${issueCategory}:</strong> ${issueSubject}</p>
+<p>${issueDetails.replace(/\n/g, "<br/>")}</p>
+${photoUrl ? `<p><a href="${photoUrl}">Photo</a></p>` : ""}`,
+          text: `${issueSubject}: ${issueDetails}`,
         },
       });
-    } catch (err) {
-      setSubmitting(false);
-      setError("Could not send email. Try again or contact the landlord directly.");
-      return;
     }
 
     setSubmitting(false);
-    setMsg("Issue sent to your landlord by email. Thank you.");
+    setMsg("Issue sent to your landlord.");
     setIssueSubject("");
     setIssueDetails("");
     setIssuePhoto(null);
@@ -346,7 +296,7 @@ ${
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center">
         <p className="text-slate-500">Loading...</p>
       </div>
     );
@@ -354,7 +304,7 @@ ${
 
   if (error && !tenant) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-4">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3">
         <p className="text-red-600 text-sm">{error}</p>
         <button onClick={handleLogout} className="text-sm text-slate-600">
           Logout
@@ -365,6 +315,9 @@ ${
 
   const status = (balance?.status || "upcoming").toLowerCase();
   const monthsAdv = Number(balance?.months_in_advance || 0);
+  const bankAccount = house?.bank_account || payInfo?.bank_account;
+  const hasPayDetails =
+    bankAccount || payInfo?.airtel_number || payInfo?.mpamba_number;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
@@ -374,9 +327,16 @@ ${
             <p className="text-xs text-slate-500">Welcome</p>
             <p className="font-bold text-slate-900">{tenant?.full_name}</p>
           </div>
-          <button onClick={handleLogout} className="text-sm text-slate-500">
-            Logout
-          </button>
+          <div className="flex items-center gap-3">
+            {isAlsoLandlord && (
+              <Link href="/dashboard" className="text-sm text-emerald-700 font-semibold">
+                Landlord view
+              </Link>
+            )}
+            <button onClick={handleLogout} className="text-sm text-slate-500">
+              Logout
+            </button>
+          </div>
         </div>
       </header>
 
@@ -385,9 +345,7 @@ ${
           <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>
         )}
         {msg && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">
-            {msg}
-          </p>
+          <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>
         )}
 
         {tab === "home" && (
@@ -411,9 +369,7 @@ ${
                 </span>
               </div>
 
-              <div className="text-xs text-slate-500 uppercase font-semibold">
-                Paid months
-              </div>
+              <p className="text-xs text-slate-500 uppercase font-semibold">Paid months</p>
               <p className="text-sm font-medium">
                 {getPaidMonths(balance?.next_due_date, monthsAdv)}
               </p>
@@ -436,20 +392,38 @@ ${
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500">Advance required</p>
-                  <p className="font-semibold">
-                    {monthsAdv} / {advanceRequired} months
-                  </p>
+                  <p className="text-xs text-slate-500">Months in advance</p>
+                  <p className="font-semibold">{monthsAdv}</p>
                 </div>
               </div>
 
-              {house?.bank_account && (
-                <p className="text-xs text-slate-500">
-                  Pay to account: <strong>{house.bank_account}</strong>
-                  <br />
-                  Airtel Money: 0995684682 · Mpamba: 0888381177
-                </p>
-              )}
+              <div className="text-xs text-slate-600 space-y-1 pt-2 border-t">
+                <p className="font-semibold text-slate-700">Pay to</p>
+                {!hasPayDetails && (
+                  <p className="text-slate-400">
+                    Your landlord has not added payment numbers yet.
+                  </p>
+                )}
+                {bankAccount && (
+                  <p>
+                    Bank{payInfo?.bank_name ? ` (${payInfo.bank_name})` : ""}:{" "}
+                    <strong>{bankAccount}</strong>
+                  </p>
+                )}
+                {payInfo?.airtel_number && (
+                  <p>
+                    Airtel Money: <strong>{payInfo.airtel_number}</strong>
+                  </p>
+                )}
+                {payInfo?.mpamba_number && (
+                  <p>
+                    TNM Mpamba: <strong>{payInfo.mpamba_number}</strong>
+                  </p>
+                )}
+                {payInfo?.payment_notes && (
+                  <p className="text-slate-500">{payInfo.payment_notes}</p>
+                )}
+              </div>
             </div>
 
             <Link
@@ -471,9 +445,7 @@ ${
                       className="flex justify-between items-center text-sm border-b border-slate-50 pb-2"
                     >
                       <div>
-                        <p className="font-semibold">
-                          {formatMK(Number(p.amount))}
-                        </p>
+                        <p className="font-semibold">{formatMK(Number(p.amount))}</p>
                         <p className="text-xs text-slate-500">
                           {p.method} · {p.paid_date}
                         </p>
@@ -495,94 +467,82 @@ ${
             className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
           >
             <h3 className="font-bold text-lg">Report a payment</h3>
-            <p className="text-xs text-slate-500">
-              After you pay, submit details here. Your landlord gets an email to
-              confirm.
-            </p>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Amount (MK)
-              </label>
-              <input
-                required
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Method
-              </label>
-              <select
-                value={method}
-                onChange={(e) => setMethod(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-              >
-                <option>Bank Transfer</option>
-                <option>Airtel Money</option>
-                <option>TNM Mpamba</option>
-                <option>Cash</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Date paid
-              </label>
-              <input
-                type="date"
-                value={paidDate}
-                onChange={(e) => setPaidDate(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Transaction ID
-              </label>
-              <input
-                value={transactionId}
-                onChange={(e) => setTransactionId(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                placeholder="From SMS or bank alert"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Reference (optional)
-              </label>
-              <input
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Screenshot / proof
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => setProofFile(e.target.files?.[0] || null)}
-                className="w-full text-sm mt-1"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Notes</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-              />
-            </div>
+            {hasPayDetails ? (
+              <div className="text-xs bg-slate-50 rounded-xl p-3 space-y-1">
+                {bankAccount && (
+                  <p>
+                    Bank: <strong>{bankAccount}</strong>
+                  </p>
+                )}
+                {payInfo?.airtel_number && (
+                  <p>
+                    Airtel Money: <strong>{payInfo.airtel_number}</strong>
+                  </p>
+                )}
+                {payInfo?.mpamba_number && (
+                  <p>
+                    TNM Mpamba: <strong>{payInfo.mpamba_number}</strong>
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl">
+                Ask your landlord to add their bank or mobile-money numbers in Settings.
+              </p>
+            )}
+            <input
+              required
+              type="number"
+              placeholder="Amount (MK)"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            >
+              <option>Bank Transfer</option>
+              <option>Airtel Money</option>
+              <option>TNM Mpamba</option>
+              <option>Cash</option>
+            </select>
+            <input
+              type="date"
+              value={paidDate}
+              onChange={(e) => setPaidDate(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
+            <input
+              placeholder="Transaction ID"
+              value={transactionId}
+              onChange={(e) => setTransactionId(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
+            <input
+              placeholder="Reference (optional)"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+              className="w-full text-sm"
+            />
+            <textarea
+              placeholder="Notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold"
             >
               {submitting ? "Submitting..." : "Submit payment report"}
             </button>
@@ -595,72 +555,44 @@ ${
             className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
           >
             <h3 className="font-bold text-lg">Report an issue</h3>
-            <p className="text-xs text-slate-500">
-              Describe the problem. An email is sent to your landlord right away.
-            </p>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Category
-              </label>
-              <select
-                value={issueCategory}
-                onChange={(e) => setIssueCategory(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-              >
-                <option>Maintenance</option>
-                <option>Plumbing</option>
-                <option>Electrical</option>
-                <option>Security</option>
-                <option>Noise / neighbour</option>
-                <option>Rent / payment query</option>
-                <option>Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Subject
-              </label>
-              <input
-                required
-                value={issueSubject}
-                onChange={(e) => setIssueSubject(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                placeholder="Short title, e.g. Leaking tap"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Details
-              </label>
-              <textarea
-                required
-                value={issueDetails}
-                onChange={(e) => setIssueDetails(e.target.value)}
-                rows={5}
-                className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                placeholder="What happened, when, and how urgent is it?"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Photo (optional)
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => setIssuePhoto(e.target.files?.[0] || null)}
-                className="w-full text-sm mt-1"
-              />
-            </div>
-
+            <select
+              value={issueCategory}
+              onChange={(e) => setIssueCategory(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            >
+              <option>Maintenance</option>
+              <option>Plumbing</option>
+              <option>Electrical</option>
+              <option>Security</option>
+              <option>Noise / neighbour</option>
+              <option>Rent / payment query</option>
+              <option>Other</option>
+            </select>
+            <input
+              required
+              placeholder="Subject"
+              value={issueSubject}
+              onChange={(e) => setIssueSubject(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
+            <textarea
+              required
+              placeholder="Details"
+              value={issueDetails}
+              onChange={(e) => setIssueDetails(e.target.value)}
+              rows={5}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+            />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setIssuePhoto(e.target.files?.[0] || null)}
+              className="w-full text-sm"
+            />
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-amber-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+              className="w-full bg-amber-600 text-white py-3 rounded-xl text-sm font-semibold"
             >
               {submitting ? "Sending..." : "Send issue to landlord"}
             </button>
@@ -668,44 +600,23 @@ ${
         )}
       </main>
 
-      {/* Bottom tabs */}
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-40">
+      <nav className="fixed bottom-0 inset-x-0 bg-white border-t z-40">
         <div className="max-w-lg mx-auto grid grid-cols-3 text-xs">
-          <button
-            onClick={() => {
-              setTab("home");
-              setError(null);
-            }}
-            className={`py-3 font-semibold ${
-              tab === "home" ? "text-emerald-700" : "text-slate-500"
-            }`}
-          >
-            Home
-          </button>
-          <button
-            onClick={() => {
-              setTab("pay");
-              setError(null);
-              setMsg(null);
-            }}
-            className={`py-3 font-semibold ${
-              tab === "pay" ? "text-emerald-700" : "text-slate-500"
-            }`}
-          >
-            Pay
-          </button>
-          <button
-            onClick={() => {
-              setTab("issues");
-              setError(null);
-              setMsg(null);
-            }}
-            className={`py-3 font-semibold ${
-              tab === "issues" ? "text-amber-700" : "text-slate-500"
-            }`}
-          >
-            Issues
-          </button>
+          {(["home", "pay", "issues"] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => {
+                setTab(t);
+                setError(null);
+                setMsg(null);
+              }}
+              className={`py-3 font-semibold capitalize ${
+                tab === t ? "text-emerald-700" : "text-slate-500"
+              }`}
+            >
+              {t === "pay" ? "Pay" : t === "issues" ? "Issues" : "Home"}
+            </button>
+          ))}
         </div>
       </nav>
     </div>
