@@ -1,0 +1,101 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-cron-secret",
+};
+
+async function sendMail(to: string, subject: string, html: string) {
+  const key = Deno.env.get("RESEND_API_KEY");
+  const from = Deno.env.get("EMAIL_FROM") || "Rentozi <onboarding@resend.dev>";
+  if (!key || !to) return false;
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to: [to], subject, html }),
+  });
+  return r.ok;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  const secret = req.headers.get("x-cron-secret") || new URL(req.url).searchParams.get("secret");
+  if (secret !== Deno.env.get("CRON_SECRET")) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  const today = new Date();
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const plus = (n: number) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + n);
+    return iso(d);
+  };
+
+  const targets = [
+    { days: 7, date: plus(7) },
+    { days: 3, date: plus(3) },
+  ];
+
+  let sent = 0;
+  for (const t of targets) {
+    const { data: bals } = await admin
+      .from("tenant_balances")
+      .select("tenant_id, next_due_date, current_balance")
+      .eq("next_due_date", t.date);
+
+    for (const b of bals || []) {
+      if (Number(b.current_balance) > 0) continue;
+
+      const { data: already } = await admin
+        .from("rent_reminders")
+        .select("id")
+        .eq("tenant_id", b.tenant_id)
+        .eq("due_date", t.date)
+        .eq("days_before", t.days)
+        .maybeSingle();
+      if (already) continue;
+
+      const { data: tenant } = await admin
+        .from("tenants")
+        .select("full_name, email, landlord_id, houses(name, code, monthly_rent)")
+        .eq("id", b.tenant_id)
+        .maybeSingle();
+      if (!tenant?.email) continue;
+
+      const house = Array.isArray(tenant.houses) ? tenant.houses[0] : tenant.houses;
+      const ok = await sendMail(
+        tenant.email,
+        `Rent reminder: due in ${t.days} day${t.days === 1 ? "" : "s"}`,
+        `<p>Hello ${tenant.full_name || ""},</p>
+<p>This is a reminder that rent for <strong>${house?.code || house?.name || "your house"}</strong>
+is due on <strong>${t.date}</strong> (${t.days} days from today).</p>
+<p>Amount: MK ${Number(house?.monthly_rent || 0).toLocaleString()}</p>
+<p>Please ignore this email if you have already paid.</p>
+<p><a href="https://rentozi.netlify.app/auth/login">Open Rentozi</a> to report payment or view your receipt.</p>`
+      );
+      if (ok) {
+        await admin.from("rent_reminders").insert({
+          tenant_id: b.tenant_id,
+          due_date: t.date,
+          days_before: t.days,
+        });
+        sent += 1;
+      }
+    }
+  }
+
+  return new Response(JSON.stringify({ ok: true, sent }), {
+    headers: { ...cors, "Content-Type": "application/json" },
+  });
+});
