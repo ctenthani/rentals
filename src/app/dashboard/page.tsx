@@ -366,6 +366,7 @@ export default function DashboardPage() {
               <Link href="/record-payment" className="px-2.5 py-1.5 rounded-lg text-slate-600">Record</Link>
               <Link href="/payments" className="px-2.5 py-1.5 rounded-lg text-slate-600">Payments</Link>
               <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">Settings</Link>
+              <Link href="/help" className="px-2.5 py-1.5 rounded-lg text-slate-600">Help</Link>
               <button onClick={handleLogout} className="px-2.5 py-1.5 rounded-lg text-slate-500">Logout</button>
             </nav>
           </div>
@@ -497,6 +498,7 @@ export default function DashboardPage() {
             <div className="flex flex-wrap gap-2">
               <button onClick={handleSaveEdit} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save</button>
               <button onClick={handleCreateLogin} className="border px-4 py-2 rounded-xl text-sm">Create login</button>
+              <Link href="/help" className="text-emerald-700 font-semibold">How to use Rentozi</Link>
               <button onClick={() => handleDelete(editing.id)} className="text-red-600 text-sm">Delete</button>
               <button onClick={() => setEditing(null)} className="text-slate-500 text-sm">Cancel</button>
             </div>
