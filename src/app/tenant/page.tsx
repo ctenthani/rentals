@@ -19,10 +19,22 @@ function formatMK(n: number) {
     .replace("MWK", "MK");
 }
 
+function computeStatus(nextDue: string | null, balance: number) {
+  if (Number(balance) > 0) return "overdue";
+  if (!nextDue) return "upcoming";
+  const due = new Date(nextDue + "T12:00:00");
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  due.setHours(12, 0, 0, 0);
+  if (due > today) return "paid";
+  if (due.getTime() === today.getTime()) return "due";
+  return "overdue";
+}
+
 function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number) {
-  if (!nextDueDate) return "—";
+  if (!nextDueDate) return "None yet";
   const d = new Date(nextDueDate + "T12:00:00");
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "None yet";
   d.setMonth(d.getMonth() - 1);
   const count = Math.max(Number(monthsInAdvance) || 1, 1);
   const months: string[] = [];
@@ -33,592 +45,222 @@ function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number) {
   return months.join(", ");
 }
 
-type Tab = "home" | "pay" | "issues";
-
-export default function TenantPortalPage() {
+export default function TenantPage() {
+  const [tab, setTab] = useState<"home" | "pay" | "issues">("home");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [tenant, setTenant] = useState<any>(null);
-  const [balance, setBalance] = useState<any>(null);
   const [house, setHouse] = useState<any>(null);
-  const [payInfo, setPayInfo] = useState<any>(null);
-  const [isAlsoLandlord, setIsAlsoLandlord] = useState(false);
+  const [balance, setBalance] = useState<any>(null);
+  const [landlord, setLandlord] = useState<any>(null);
   const [payments, setPayments] = useState<any[]>([]);
-  const [tab, setTab] = useState<Tab>("home");
-  const [submitting, setSubmitting] = useState(false);
+  const [isAlsoLandlord, setIsAlsoLandlord] = useState(false);
 
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("Bank Transfer");
-  const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
-  const [transactionId, setTransactionId] = useState("");
+  const [method, setMethod] = useState("Airtel Money");
   const [reference, setReference] = useState("");
-  const [notes, setNotes] = useState("");
-  const [proofFile, setProofFile] = useState<File | null>(null);
-
-  const [issueCategory, setIssueCategory] = useState("Maintenance");
-  const [issueSubject, setIssueSubject] = useState("");
-  const [issueDetails, setIssueDetails] = useState("");
-  const [issuePhoto, setIssuePhoto] = useState<File | null>(null);
+  const [paidDate, setPaidDate] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [issue, setIssue] = useState("");
 
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   async function load() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
-      router.push("/auth/login");
-      return;
-    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { router.push("/auth/login"); return; }
 
-    const { data: llCheck } = await supabase
-      .from("landlords")
-      .select("id")
-      .eq("auth_user_id", session.user.id)
-      .maybeSingle();
-    setIsAlsoLandlord(!!llCheck);
+    const { data: ownLl } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+    const { data: mem } = await supabase.from("landlord_members").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+    setIsAlsoLandlord(!!ownLl || !!mem);
 
-    const { data: t, error: tErr } = await supabase
+    const { data: t } = await supabase
       .from("tenants")
-      .select(
-        `id, full_name, phone, email, landlord_id,
-         houses ( id, name, code, monthly_rent, bank_account )`
-      )
+      .select("*, houses(id, name, code, monthly_rent, bank_account)")
       .eq("auth_user_id", session.user.id)
       .maybeSingle();
-
-    if (tErr || !t) {
-      setError("No tenant profile linked to this login");
-      setLoading(false);
-      return;
-    }
-
-    const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+    if (!t) { setError("No tenant profile linked to this login"); setLoading(false); return; }
     setTenant(t);
-    setHouse(h || null);
+    const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+    setHouse(h);
+
+    const { data: b } = await supabase.from("tenant_balances").select("*").eq("tenant_id", t.id).maybeSingle();
+    setBalance(b);
 
     if (t.landlord_id) {
       const { data: ll } = await supabase
         .from("landlords")
-        .select(
-          "email, business_name, full_name, airtel_number, mpamba_number, bank_name, bank_account, payment_notes"
-        )
+        .select("full_name, business_name, email, airtel_number, mpamba_number, bank_name, bank_account, payment_notes")
         .eq("id", t.landlord_id)
         .maybeSingle();
-      setPayInfo(ll);
+      setLandlord(ll);
     }
-
-    const { data: bal } = await supabase
-      .from("tenant_balances")
-      .select("*")
-      .eq("tenant_id", t.id)
-      .maybeSingle();
-    setBalance(bal);
 
     const { data: pays } = await supabase
       .from("payments")
-      .select("id, amount, method, paid_date, months_covered, notes, created_at")
+      .select("id, amount, paid_date, method, created_at")
       .eq("tenant_id", t.id)
-      .order("paid_date", { ascending: false })
-      .limit(20);
+      .order("created_at", { ascending: false });
     setPayments(pays || []);
     setLoading(false);
   }
 
-  useEffect(() => {
-    load();
-  }, [router]);
+  useEffect(() => { load(); }, [router]);
 
-  const getLandlordEmail = async (landlordId: string | null) => {
-    if (landlordId) {
-      const { data: ll } = await supabase
-        .from("landlords")
-        .select("email")
-        .eq("id", landlordId)
-        .maybeSingle();
-      if (ll?.email) return ll.email as string;
-    }
-    return payInfo?.email || null;
-  };
-
-  const houseLabel = () =>
-    house ? `${house.name} (${house.code})` : "property";
-
-  const handleSubmitPayment = async (e: React.FormEvent) => {
+  const submitPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
-    const amt = Number(amount);
-    if (!amt || amt <= 0) {
-      setError("Enter a valid amount");
-      return;
+    setError(null); setMsg(null);
+    let proof: string | null = null;
+    if (file) {
+      const path = `${tenant.id}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("payment-proofs").upload(path, file);
+      if (upErr) { setError(upErr.message); return; }
+      proof = path;
     }
-    if (!transactionId.trim() && !reference.trim()) {
-      setError("Enter a transaction ID or payment reference");
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-    setMsg(null);
-
-    let proofUrl: string | null = null;
-    if (proofFile) {
-      const path = `${tenant.id}/${Date.now()}-${proofFile.name.replace(
-        /[^a-zA-Z0-9._-]/g,
-        "_"
-      )}`;
-      const { error: upErr } = await supabase.storage
-        .from("payment-proofs")
-        .upload(path, proofFile, { upsert: true });
-      if (upErr) {
-        setSubmitting(false);
-        setError(upErr.message);
-        return;
-      }
-      const { data: pub } = supabase.storage
-        .from("payment-proofs")
-        .getPublicUrl(path);
-      proofUrl = pub.publicUrl;
-    }
-
     const { error: insErr } = await supabase.from("payment_submissions").insert({
       tenant_id: tenant.id,
-      amount: amt,
+      amount: Number(amount),
       method,
-      paid_date: paidDate,
-      reference_used: reference.trim() || transactionId.trim(),
-      transaction_id: transactionId.trim() || null,
-      notes: notes.trim() || null,
-      proof_url: proofUrl,
+      reference_used: reference,
+      paid_date: paidDate || new Date().toISOString().slice(0, 10),
+      proof_path: proof,
       status: "pending",
     });
-
-    if (insErr) {
-      setSubmitting(false);
-      setError(insErr.message);
-      return;
-    }
-
-    const to = await getLandlordEmail(tenant.landlord_id);
-    if (to) {
+    if (insErr) { setError(insErr.message); return; }
+    if (landlord?.email) {
       await supabase.functions.invoke("send-email", {
         body: {
-          to,
-          subject: `Payment pending confirmation – ${tenant.full_name}`,
-          html: `<p><strong>${tenant.full_name}</strong> submitted a payment for ${houseLabel()}.</p>
-<p>Amount: MK ${amt.toLocaleString()} · ${method} · ${transactionId || reference}</p>
-<p><a href="https://rentozi.netlify.app/pending">Open Pending</a></p>`,
-          text: `${tenant.full_name} submitted a payment. Confirm on Pending.`,
+          to: landlord.email,
+          subject: `Payment to confirm: ${tenant.full_name}`,
+          html: `<p>${tenant.full_name} reported MK ${Number(amount).toLocaleString()} via ${method}. Open Pending in Rentozi.</p>`,
         },
       });
     }
-
-    setSubmitting(false);
-    setMsg("Payment report submitted. Your landlord has been notified.");
-    setTab("home");
-    setAmount("");
-    setTransactionId("");
-    setReference("");
-    setNotes("");
-    setProofFile(null);
-    await load();
+    setMsg("Submitted. Wait for your landlord to confirm.");
+    setAmount(""); setReference(""); setFile(null);
   };
 
-  const handleSubmitIssue = async (e: React.FormEvent) => {
+  const submitIssue = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !issueSubject.trim() || !issueDetails.trim()) {
-      setError("Enter a subject and details");
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    setMsg(null);
-
-    let photoUrl: string | null = null;
-    if (issuePhoto) {
-      const path = `issues/${tenant.id}/${Date.now()}-${issuePhoto.name.replace(
-        /[^a-zA-Z0-9._-]/g,
-        "_"
-      )}`;
-      const { error: upErr } = await supabase.storage
-        .from("payment-proofs")
-        .upload(path, issuePhoto, { upsert: true });
-      if (!upErr) {
-        const { data: pub } = supabase.storage
-          .from("payment-proofs")
-          .getPublicUrl(path);
-        photoUrl = pub.publicUrl;
-      }
-    }
-
-    try {
-      await supabase.from("tenant_issues").insert({
-        tenant_id: tenant.id,
-        category: issueCategory,
-        subject: issueSubject.trim(),
-        details: issueDetails.trim(),
-        photo_url: photoUrl,
-        status: "open",
-      });
-    } catch {
-      /* optional table */
-    }
-
-    const to = await getLandlordEmail(tenant.landlord_id);
-    if (to) {
+    if (!tenant || !issue.trim()) return;
+    await supabase.from("tenant_issues").insert({ tenant_id: tenant.id, message: issue, status: "open" });
+    if (landlord?.email) {
       await supabase.functions.invoke("send-email", {
         body: {
-          to,
-          subject: `Tenant issue: ${issueCategory} – ${tenant.full_name}`,
-          html: `<p>${tenant.full_name} (${houseLabel()})</p>
-<p><strong>${issueCategory}:</strong> ${issueSubject}</p>
-<p>${issueDetails.replace(/\n/g, "<br/>")}</p>
-${photoUrl ? `<p><a href="${photoUrl}">Photo</a></p>` : ""}`,
-          text: `${issueSubject}: ${issueDetails}`,
+          to: landlord.email,
+          subject: `Issue from ${tenant.full_name}`,
+          html: `<p>${issue}</p>`,
         },
       });
     }
-
-    setSubmitting(false);
+    setIssue("");
     setMsg("Issue sent to your landlord.");
-    setIssueSubject("");
-    setIssueDetails("");
-    setIssuePhoto(null);
-    setTab("home");
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/auth/login");
-  };
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-500">Loading...</p>
-      </div>
-    );
-  }
-
-  if (error && !tenant) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3">
-        <p className="text-red-600 text-sm">{error}</p>
-        <button onClick={handleLogout} className="text-sm text-slate-600">
-          Logout
-        </button>
-      </div>
-    );
-  }
-
-  const status = (balance?.status || "upcoming").toLowerCase();
-  const monthsAdv = Number(balance?.months_in_advance || 0);
-  const bankAccount = house?.bank_account || payInfo?.bank_account;
-  const hasPayDetails =
-    bankAccount || payInfo?.airtel_number || payInfo?.mpamba_number;
+  const status = computeStatus(balance?.next_due_date || null, Number(balance?.current_balance || 0));
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50">
       <header className="bg-white border-b sticky top-0 z-30">
-        <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
-          <div>
-            <p className="text-xs text-slate-500">Welcome</p>
-            <p className="font-bold text-slate-900">{tenant?.full_name}</p>
+        <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between gap-2">
+          <p className="font-bold truncate">{landlord?.business_name || "My rent"}</p>
+          <div className="flex gap-2 text-xs">
+            {isAlsoLandlord && <Link href="/dashboard" className="text-emerald-700 font-semibold">Landlord</Link>}
+            <Link href="/help" className="text-slate-600">Help</Link>
+            <button onClick={async () => { await supabase.auth.signOut(); router.push("/auth/login"); }} className="text-slate-500">Logout</button>
           </div>
-          <div className="flex items-center gap-3">
-            {isAlsoLandlord && (
-              <Link href="/dashboard" className="text-sm text-emerald-700 font-semibold">
-                Landlord view
-              </Link>
-            )}
-            <button onClick={handleLogout} className="text-sm text-slate-500">
-              Logout
+        </div>
+        <div className="max-w-lg mx-auto px-4 flex gap-2 pb-2">
+          {(["home", "pay", "issues"] as const).map((k) => (
+            <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-lg text-sm capitalize ${tab === k ? "bg-emerald-100 text-emerald-900 font-semibold" : "text-slate-600"}`}>
+              {k === "home" ? "Home" : k === "pay" ? "Pay" : "Issues"}
             </button>
-          </div>
+          ))}
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 py-5 space-y-4">
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>
-        )}
-        {msg && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>
-        )}
+      <main className="max-w-lg mx-auto p-4 space-y-4">
+        {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+        {msg && <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>}
 
         {tab === "home" && (
           <>
-            <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
-              <div className="flex items-start justify-between gap-2">
+            <section className="bg-white rounded-2xl border p-5 space-y-2">
+              <div className="flex justify-between items-start">
                 <div>
-                  <p className="font-bold text-lg">{house?.name || "Property"}</p>
-                  <p className="text-xs text-slate-500">{house?.code}</p>
+                  <p className="font-bold">{tenant?.full_name}</p>
+                  <p className="text-xs text-slate-500">{house?.code} · {house?.name}</p>
                 </div>
-                <span
-                  className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                    status === "paid"
-                      ? "bg-emerald-100 text-emerald-800"
-                      : status === "overdue"
-                      ? "bg-red-100 text-red-800"
-                      : "bg-sky-100 text-sky-800"
-                  }`}
-                >
-                  {status.toUpperCase()}
-                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  status === "paid" ? "bg-emerald-100 text-emerald-800" :
+                  status === "overdue" ? "bg-red-100 text-red-800" :
+                  status === "due" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"
+                }`}>{status.toUpperCase()}</span>
               </div>
+              <p className="text-sm">Rent {formatMK(Number(house?.monthly_rent || 0))}</p>
+              <p className="text-sm">Next due: <strong>{balance?.next_due_date || "Not set"}</strong></p>
+              <p className="text-sm">Paid months: {getPaidMonths(balance?.next_due_date, Number(balance?.months_in_advance || 0))}</p>
+              <Link href={`/lease?tenant_id=${tenant?.id}`} className="inline-block text-sm text-sky-700 font-semibold">View / sign lease</Link>
+            </section>
 
-              <p className="text-xs text-slate-500 uppercase font-semibold">Paid months</p>
-              <p className="text-sm font-medium">
-                {getPaidMonths(balance?.next_due_date, monthsAdv)}
-              </p>
-
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <p className="text-xs text-slate-500">Next due date</p>
-                  <p className="font-semibold">{balance?.next_due_date || "—"}</p>
+            <section className="bg-white rounded-2xl border p-5 space-y-3">
+              <h2 className="font-bold">Receipts</h2>
+              {payments.length === 0 && <p className="text-sm text-slate-500">No confirmed receipts yet.</p>}
+              {payments.map((p) => (
+                <div key={p.id} className="flex items-center justify-between border rounded-xl px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-semibold">{formatMK(Number(p.amount))}</p>
+                    <p className="text-[11px] text-slate-500">{p.paid_date || p.created_at?.slice(0, 10)} · {p.method || ""}</p>
+                  </div>
+                  <Link
+                    href={`/receipt?id=${p.id}`}
+                    className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
+                  >
+                    Open / print
+                  </Link>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-500">Outstanding</p>
-                  <p className="font-semibold text-red-600">
-                    {formatMK(Number(balance?.current_balance || 0))}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Monthly rent</p>
-                  <p className="font-semibold">
-                    {formatMK(Number(house?.monthly_rent || 0))}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Months in advance</p>
-                  <p className="font-semibold">{monthsAdv}</p>
-                </div>
-              </div>
-
-              <div className="text-xs text-slate-600 space-y-1 pt-2 border-t">
-                <p className="font-semibold text-slate-700">Pay to</p>
-                {!hasPayDetails && (
-                  <p className="text-slate-400">
-                    Your landlord has not added payment numbers yet.
-                  </p>
-                )}
-                {bankAccount && (
-                  <p>
-                    Bank{payInfo?.bank_name ? ` (${payInfo.bank_name})` : ""}:{" "}
-                    <strong>{bankAccount}</strong>
-                  </p>
-                )}
-                {payInfo?.airtel_number && (
-                  <p>
-                    Airtel Money: <strong>{payInfo.airtel_number}</strong>
-                  </p>
-                )}
-                {payInfo?.mpamba_number && (
-                  <p>
-                    TNM Mpamba: <strong>{payInfo.mpamba_number}</strong>
-                  </p>
-                )}
-                {payInfo?.payment_notes && (
-                  <p className="text-slate-500">{payInfo.payment_notes}</p>
-                )}
-              </div>
-            </div>
-
-            <Link
-              href="/tenant/lease"
-              className="block w-full text-center border-2 border-emerald-600 text-emerald-800 font-semibold py-3 rounded-xl"
-            >
-              View / sign lease
-            </Link>
-
-            <div className="bg-white rounded-2xl border shadow-sm p-4">
-              <h2 className="font-bold mb-3">Payment History</h2>
-              {payments.length === 0 ? (
-                <p className="text-sm text-slate-500">No payments recorded yet</p>
-              ) : (
-                <ul className="space-y-2">
-                  {payments.map((p) => (
-                    <li
-                      key={p.id}
-                      className="flex justify-between items-center text-sm border-b border-slate-50 pb-2"
-                    >
-                      <div>
-                        <p className="font-semibold">{formatMK(Number(p.amount))}</p>
-                        <p className="text-xs text-slate-500">
-                          {p.method} · {p.paid_date}
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
-                        CONFIRMED
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+              ))}
+            </section>
           </>
         )}
 
         {tab === "pay" && (
-          <form
-            onSubmit={handleSubmitPayment}
-            className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
-          >
-            <h3 className="font-bold text-lg">Report a payment</h3>
-            {hasPayDetails ? (
-              <div className="text-xs bg-slate-50 rounded-xl p-3 space-y-1">
-                {bankAccount && (
-                  <p>
-                    Bank: <strong>{bankAccount}</strong>
-                  </p>
-                )}
-                {payInfo?.airtel_number && (
-                  <p>
-                    Airtel Money: <strong>{payInfo.airtel_number}</strong>
-                  </p>
-                )}
-                {payInfo?.mpamba_number && (
-                  <p>
-                    TNM Mpamba: <strong>{payInfo.mpamba_number}</strong>
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl">
-                Ask your landlord to add their bank or mobile-money numbers in Settings.
-              </p>
-            )}
-            <input
-              required
-              type="number"
-              placeholder="Amount (MK)"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            >
-              <option>Bank Transfer</option>
+          <form onSubmit={submitPay} className="bg-white rounded-2xl border p-5 space-y-3">
+            <h2 className="font-bold">Report a payment</h2>
+            <div className="text-sm bg-slate-50 rounded-xl p-3 space-y-1">
+              <p className="font-semibold">Pay to</p>
+              {landlord?.bank_name && <p>Bank: {landlord.bank_name} {landlord.bank_account}</p>}
+              {house?.bank_account && <p>Account: {house.bank_account}</p>}
+              {landlord?.airtel_number && <p>Airtel: {landlord.airtel_number}</p>}
+              {landlord?.mpamba_number && <p>Mpamba: {landlord.mpamba_number}</p>}
+              {landlord?.payment_notes && <p className="text-xs text-slate-500">{landlord.payment_notes}</p>}
+            </div>
+            <input required type="number" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <select className="w-full border rounded-xl px-3 py-2 text-sm" value={method} onChange={(e) => setMethod(e.target.value)}>
               <option>Airtel Money</option>
-              <option>TNM Mpamba</option>
+              <option>Mpamba</option>
+              <option>Bank</option>
               <option>Cash</option>
             </select>
-            <input
-              type="date"
-              value={paidDate}
-              onChange={(e) => setPaidDate(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Transaction ID"
-              value={transactionId}
-              onChange={(e) => setTransactionId(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Reference (optional)"
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setProofFile(e.target.files?.[0] || null)}
-              className="w-full text-sm"
-            />
-            <textarea
-              placeholder="Notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold"
-            >
-              {submitting ? "Submitting..." : "Submit payment report"}
-            </button>
+            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Transaction ID" value={reference} onChange={(e) => setReference(e.target.value)} />
+            <input type="date" className="w-full border rounded-xl px-3 py-2 text-sm" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
+            <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <button className="w-full bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold">Submit for confirmation</button>
           </form>
         )}
 
         {tab === "issues" && (
-          <form
-            onSubmit={handleSubmitIssue}
-            className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
-          >
-            <h3 className="font-bold text-lg">Report an issue</h3>
-            <select
-              value={issueCategory}
-              onChange={(e) => setIssueCategory(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            >
-              <option>Maintenance</option>
-              <option>Plumbing</option>
-              <option>Electrical</option>
-              <option>Security</option>
-              <option>Noise / neighbour</option>
-              <option>Rent / payment query</option>
-              <option>Other</option>
-            </select>
-            <input
-              required
-              placeholder="Subject"
-              value={issueSubject}
-              onChange={(e) => setIssueSubject(e.target.value)}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <textarea
-              required
-              placeholder="Details"
-              value={issueDetails}
-              onChange={(e) => setIssueDetails(e.target.value)}
-              rows={5}
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-            />
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setIssuePhoto(e.target.files?.[0] || null)}
-              className="w-full text-sm"
-            />
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-amber-600 text-white py-3 rounded-xl text-sm font-semibold"
-            >
-              {submitting ? "Sending..." : "Send issue to landlord"}
-            </button>
+          <form onSubmit={submitIssue} className="bg-white rounded-2xl border p-5 space-y-3">
+            <h2 className="font-bold">Report an issue</h2>
+            <textarea required rows={5} className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Describe the problem" value={issue} onChange={(e) => setIssue(e.target.value)} />
+            <button className="w-full bg-slate-800 text-white py-2.5 rounded-xl text-sm font-semibold">Send to landlord</button>
           </form>
         )}
       </main>
-
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t z-40">
-        <div className="max-w-lg mx-auto grid grid-cols-3 text-xs">
-          {(["home", "pay", "issues"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                setTab(t);
-                setError(null);
-                setMsg(null);
-              }}
-              className={`py-3 font-semibold capitalize ${
-                tab === t ? "text-emerald-700" : "text-slate-500"
-              }`}
-            >
-              {t === "pay" ? "Pay" : t === "issues" ? "Issues" : "Home"}
-            </button>
-          ))}
-        </div>
-      </nav>
     </div>
   );
 }
