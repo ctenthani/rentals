@@ -39,10 +39,9 @@ function computeStatus(nextDue: string | null, balance: number) {
   const due = new Date(nextDue + "T12:00:00");
   const today = new Date();
   today.setHours(12, 0, 0, 0);
-  const dueDay = new Date(due);
-  dueDay.setHours(12, 0, 0, 0);
-  if (dueDay > today) return "paid";
-  if (dueDay.getTime() === today.getTime()) return "due";
+  due.setHours(12, 0, 0, 0);
+  if (due > today) return "paid";
+  if (due.getTime() === today.getTime()) return "due";
   return "overdue";
 }
 
@@ -131,9 +130,7 @@ export default function DashboardPage() {
         .maybeSingle();
       if (landlord) {
         landlordId = landlord.id;
-        setBusinessName(
-          landlord.business_name || landlord.full_name || "My Rentals"
-        );
+        setBusinessName(landlord.business_name || landlord.full_name || "My Rentals");
         setLandlordName(landlord.full_name || "");
       }
     }
@@ -217,6 +214,7 @@ export default function DashboardPage() {
   const handleSaveEdit = async () => {
     if (!editing) return;
     setSaving(true);
+    setError(null);
     await supabase
       .from("tenants")
       .update({
@@ -256,23 +254,20 @@ export default function DashboardPage() {
       return;
     }
     setSaving(true);
-    const { data, error: fnErr } = await supabase.functions.invoke(
-      "create-tenant-user",
-      {
-        body: {
-          email: editing.email.trim(),
-          password: loginPassword,
-          tenant_id: editing.id,
-          full_name: editing.full_name,
-        },
-      }
-    );
+    const { data, error: fnErr } = await supabase.functions.invoke("create-tenant-user", {
+      body: {
+        email: editing.email.trim(),
+        password: loginPassword,
+        tenant_id: editing.id,
+        full_name: editing.full_name,
+      },
+    });
     setSaving(false);
     if (fnErr || data?.error) {
       setError(fnErr?.message || data?.error);
       return;
     }
-    alert(`Login created: ${loginPassword}`);
+    alert(`Login created for ${editing.email}. Password: ${loginPassword}`);
     await loadData();
   };
 
@@ -333,9 +328,7 @@ export default function DashboardPage() {
         <div className="w-full max-w-[100vw] px-3 lg:px-6">
           <div className="flex items-center justify-between h-14 gap-2">
             <div>
-              <p className="font-bold text-slate-900 text-sm sm:text-base">
-                {businessName}
-              </p>
+              <p className="font-bold text-slate-900 text-sm sm:text-base">{businessName}</p>
               <p className="text-[11px] text-slate-500 truncate max-w-[220px]">
                 {landlordName ? `${landlordName} · ` : ""}
                 {userEmail}
@@ -363,20 +356,28 @@ export default function DashboardPage() {
                   </span>
                 )}
               </Link>
-              <Link href="/record-payment" className="px-2.5 py-1.5 rounded-lg text-slate-600">Record</Link>
-              <Link href="/payments" className="px-2.5 py-1.5 rounded-lg text-slate-600">Payments</Link>
-              <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">Settings</Link>
-              <Link href="/help" className="px-2.5 py-1.5 rounded-lg text-slate-600">Help</Link>
-              <button onClick={handleLogout} className="px-2.5 py-1.5 rounded-lg text-slate-500">Logout</button>
+              <Link href="/record-payment" className="px-2.5 py-1.5 rounded-lg text-slate-600">
+                Record
+              </Link>
+              <Link href="/payments" className="px-2.5 py-1.5 rounded-lg text-slate-600">
+                Payments
+              </Link>
+              <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">
+                Settings
+              </Link>
+              <Link href="/help" className="px-2.5 py-1.5 rounded-lg text-slate-600">
+                Help
+              </Link>
+              <button onClick={handleLogout} className="px-2.5 py-1.5 rounded-lg text-slate-500">
+                Logout
+              </button>
             </nav>
           </div>
         </div>
       </header>
 
       <main className="w-full max-w-[100vw] px-3 lg:px-6 py-4 space-y-4">
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>
-        )}
+        {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Expected</p>
@@ -388,7 +389,9 @@ export default function DashboardPage() {
           </div>
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Paid / Overdue</p>
-            <p className="text-lg font-bold">{totals.paid} / {totals.overdue}</p>
+            <p className="text-lg font-bold">
+              {totals.paid} / {totals.overdue}
+            </p>
           </div>
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Properties</p>
@@ -410,9 +413,13 @@ export default function DashboardPage() {
           <table className="w-full text-left text-xs min-w-[900px]">
             <thead className="bg-emerald-50 text-emerald-900">
               <tr>
-                {["House","Tenant","Rent","Next due","Paid months","Balance","Status","Bank","Login","Actions"].map((h) => (
-                  <th key={h} className="px-2 py-2">{h}</th>
-                ))}
+                {["House", "Tenant", "Rent", "Next due", "Paid months", "Balance", "Status", "Bank", "Login", "Actions"].map(
+                  (h) => (
+                    <th key={h} className="px-2 py-2">
+                      {h}
+                    </th>
+                  )
+                )}
               </tr>
             </thead>
             <tbody>
@@ -433,12 +440,18 @@ export default function DashboardPage() {
                     <div className="text-slate-400">{r.months_in_advance} mo adv</div>
                   </td>
                   <td className="px-2 py-2 text-rose-600 font-semibold">{formatMK(r.current_balance)}</td>
-                  <td className="px-2 py-2"><StatusBadge status={r.status} /></td>
+                  <td className="px-2 py-2">
+                    <StatusBadge status={r.status} />
+                  </td>
                   <td className="px-2 py-2 text-[10px]">{r.bank_account || "—"}</td>
                   <td className="px-2 py-2">{r.auth_user_id ? "Yes" : "No"}</td>
                   <td className="px-2 py-2 space-x-1 whitespace-nowrap">
-                    <button onClick={() => setEditing({ ...r })} className="text-emerald-700 font-semibold">Edit</button>
-                    <Link href={`/lease?tenant_id=${r.id}`} className="text-sky-700 font-semibold">Lease</Link>
+                    <button onClick={() => setEditing({ ...r })} className="text-emerald-700 font-semibold">
+                      Edit
+                    </button>
+                    <Link href={`/lease?tenant_id=${r.id}`} className="text-sky-700 font-semibold">
+                      Lease
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -490,12 +503,13 @@ export default function DashboardPage() {
               value={editing.current_balance}
               onChange={(e) => setEditing({ ...editing, current_balance: e.target.value })}
             />
+            <label className="text-xs font-semibold text-slate-500">Default login password</label>
             <input
               className="w-full border rounded-xl px-3 py-2 text-sm"
               value={loginPassword}
               onChange={(e) => setLoginPassword(e.target.value)}
             />
-                        <div className="flex flex-wrap items-center gap-2 pt-2">
+            <div className="flex flex-wrap items-center gap-2 pt-2">
               <button
                 onClick={handleSaveEdit}
                 disabled={saving}
@@ -532,6 +546,9 @@ export default function DashboardPage() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
 
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -546,7 +563,9 @@ export default function DashboardPage() {
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
             <div className="flex gap-2">
               <button className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save</button>
-              <button type="button" onClick={() => setShowAdd(false)} className="text-slate-500 text-sm">Cancel</button>
+              <button type="button" onClick={() => setShowAdd(false)} className="text-slate-500 text-sm">
+                Cancel
+              </button>
             </div>
           </form>
         </div>
