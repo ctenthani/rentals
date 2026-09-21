@@ -495,16 +495,43 @@ export default function DashboardPage() {
               value={loginPassword}
               onChange={(e) => setLoginPassword(e.target.value)}
             />
-            <div className="flex flex-wrap gap-2">
-              <button onClick={handleSaveEdit} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save</button>
-              <button onClick={handleCreateLogin} className="border px-4 py-2 rounded-xl text-sm">Create login</button>
-              <Link href="/help" className="text-emerald-700 font-semibold">How to use Rentozi</Link>
-              <button onClick={() => handleDelete(editing.id)} className="text-red-600 text-sm">Delete</button>
-              <button onClick={() => setEditing(null)} className="text-slate-500 text-sm">Cancel</button>
+                       <div className="flex flex-wrap items-center gap-2 pt-2">
+              <button
+                onClick={handleSaveEdit}
+                disabled={saving}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-semibold"
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateLogin}
+                disabled={saving}
+                className="border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm font-semibold"
+              >
+                Create login
+              </button>
+              <Link
+                href="/help"
+                className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl text-sm font-semibold"
+              >
+                Rentozi Help
+              </Link>
+              <button
+                type="button"
+                onClick={() => handleDelete(editing.id)}
+                className="border border-red-200 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-semibold"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="text-slate-500 hover:bg-slate-100 px-4 py-2 rounded-xl text-sm font-semibold"
+              >
+                Cancel
+              </button>
             </div>
-          </div>
-        </div>
-      )}
 
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
