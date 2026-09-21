@@ -63,6 +63,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<any[]>([]);
   const [userEmail, setUserEmail] = useState("");
@@ -85,9 +88,6 @@ export default function DashboardPage() {
     email: "",
   });
 
-  const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
   async function loadData() {
     const {
       data: { session },
@@ -96,21 +96,22 @@ export default function DashboardPage() {
       router.push("/auth/login");
       return;
     }
+
     setUserEmail(session.user.email || "");
 
-    const { data: tenantRow } = await supabase
+    const { data: tenantRows } = await supabase
       .from("tenants")
       .select("id")
-      .eq("auth_user_id", session.user.id)
-      .maybeSingle();
+      .eq("auth_user_id", session.user.id);
+    const tenantRow = tenantRows?.[0] || null;
 
     const { data: mem } = await supabase
       .from("landlord_members")
       .select("landlord_id")
       .eq("auth_user_id", session.user.id)
-      .maybeSingle();
+      .limit(1);
 
-    let landlordId: string | null = mem?.landlord_id || null;
+    let landlordId: string | null = mem?.[0]?.landlord_id || null;
 
     if (landlordId) {
       const { data: ll } = await supabase
@@ -203,13 +204,6 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, [router]);
-
-  const totals = {
-    expected: rows.reduce((s, r) => s + r.monthly_rent, 0),
-    outstanding: rows.reduce((s, r) => s + r.current_balance, 0),
-    paid: rows.filter((r) => r.status === "paid").length,
-    overdue: rows.filter((r) => r.status === "overdue").length,
-  };
 
   const handleSaveEdit = async () => {
     if (!editing) return;
@@ -356,21 +350,11 @@ export default function DashboardPage() {
                   </span>
                 )}
               </Link>
-              <Link href="/record-payment" className="px-2.5 py-1.5 rounded-lg text-slate-600">
-                Record
-              </Link>
-              <Link href="/payments" className="px-2.5 py-1.5 rounded-lg text-slate-600">
-                Payments
-              </Link>
-              <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">
-                Settings
-              </Link>
-              <Link href="/help" className="px-2.5 py-1.5 rounded-lg text-slate-600">
-                Help
-              </Link>
-              <button onClick={handleLogout} className="px-2.5 py-1.5 rounded-lg text-slate-500">
-                Logout
-              </button>
+              <Link href="/record-payment" className="px-2.5 py-1.5 rounded-lg text-slate-600">Record</Link>
+              <Link href="/payments" className="px-2.5 py-1.5 rounded-lg text-slate-600">Payments</Link>
+              <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">Settings</Link>
+              <Link href="/help" className="px-2.5 py-1.5 rounded-lg text-slate-600">Help</Link>
+              <button onClick={handleLogout} className="px-2.5 py-1.5 rounded-lg text-slate-500">Logout</button>
             </nav>
           </div>
         </div>
@@ -378,6 +362,7 @@ export default function DashboardPage() {
 
       <main className="w-full max-w-[100vw] px-3 lg:px-6 py-4 space-y-4">
         {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Expected</p>
@@ -389,9 +374,7 @@ export default function DashboardPage() {
           </div>
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Paid / Overdue</p>
-            <p className="text-lg font-bold">
-              {totals.paid} / {totals.overdue}
-            </p>
+            <p className="text-lg font-bold">{totals.paid} / {totals.overdue}</p>
           </div>
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Properties</p>
@@ -401,10 +384,7 @@ export default function DashboardPage() {
 
         <div className="flex justify-between items-center">
           <h2 className="font-bold">Houses &amp; Tenants</h2>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl"
-          >
+          <button onClick={() => setShowAdd(true)} className="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl">
             + Add Property
           </button>
         </div>
@@ -413,13 +393,9 @@ export default function DashboardPage() {
           <table className="w-full text-left text-xs min-w-[900px]">
             <thead className="bg-emerald-50 text-emerald-900">
               <tr>
-                {["House", "Tenant", "Rent", "Next due", "Paid months", "Balance", "Status", "Bank", "Login", "Actions"].map(
-                  (h) => (
-                    <th key={h} className="px-2 py-2">
-                      {h}
-                    </th>
-                  )
-                )}
+                {["House","Tenant","Rent","Next due","Paid months","Balance","Status","Bank","Login","Actions"].map((h) => (
+                  <th key={h} className="px-2 py-2">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -440,18 +416,12 @@ export default function DashboardPage() {
                     <div className="text-slate-400">{r.months_in_advance} mo adv</div>
                   </td>
                   <td className="px-2 py-2 text-rose-600 font-semibold">{formatMK(r.current_balance)}</td>
-                  <td className="px-2 py-2">
-                    <StatusBadge status={r.status} />
-                  </td>
+                  <td className="px-2 py-2"><StatusBadge status={r.status} /></td>
                   <td className="px-2 py-2 text-[10px]">{r.bank_account || "—"}</td>
                   <td className="px-2 py-2">{r.auth_user_id ? "Yes" : "No"}</td>
                   <td className="px-2 py-2 space-x-1 whitespace-nowrap">
-                    <button onClick={() => setEditing({ ...r })} className="text-emerald-700 font-semibold">
-                      Edit
-                    </button>
-                    <Link href={`/lease?tenant_id=${r.id}`} className="text-sky-700 font-semibold">
-                      Lease
-                    </Link>
+                    <button onClick={() => setEditing({ ...r })} className="text-emerald-700 font-semibold">Edit</button>
+                    <Link href={`/lease?tenant_id=${r.id}`} className="text-sky-700 font-semibold">Lease</Link>
                   </td>
                 </tr>
               ))}
@@ -483,66 +453,28 @@ export default function DashboardPage() {
               </div>
             ))}
             <label className="text-xs font-semibold text-slate-500">Next due date</label>
-            <input
-              type="date"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.next_due_date || ""}
-              onChange={(e) => setEditing({ ...editing, next_due_date: e.target.value })}
-            />
+            <input type="date" className="w-full border rounded-xl px-3 py-2 text-sm" value={editing.next_due_date || ""} onChange={(e) => setEditing({ ...editing, next_due_date: e.target.value })} />
             <label className="text-xs font-semibold text-slate-500">Months in advance</label>
-            <input
-              type="number"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.months_in_advance}
-              onChange={(e) => setEditing({ ...editing, months_in_advance: e.target.value })}
-            />
+            <input type="number" className="w-full border rounded-xl px-3 py-2 text-sm" value={editing.months_in_advance} onChange={(e) => setEditing({ ...editing, months_in_advance: e.target.value })} />
             <label className="text-xs font-semibold text-slate-500">Balance</label>
-            <input
-              type="number"
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={editing.current_balance}
-              onChange={(e) => setEditing({ ...editing, current_balance: e.target.value })}
-            />
+            <input type="number" className="w-full border rounded-xl px-3 py-2 text-sm" value={editing.current_balance} onChange={(e) => setEditing({ ...editing, current_balance: e.target.value })} />
             <label className="text-xs font-semibold text-slate-500">Default login password</label>
-            <input
-              className="w-full border rounded-xl px-3 py-2 text-sm"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-            />
+            <input className="w-full border rounded-xl px-3 py-2 text-sm" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
+
             <div className="flex flex-wrap items-center gap-2 pt-2">
-              <button
-                onClick={handleSaveEdit}
-                disabled={saving}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-semibold"
-              >
+              <button onClick={handleSaveEdit} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-semibold">
                 {saving ? "Saving..." : "Save"}
               </button>
-              <button
-                type="button"
-                onClick={handleCreateLogin}
-                disabled={saving}
-                className="border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm font-semibold"
-              >
+              <button type="button" onClick={handleCreateLogin} disabled={saving} className="border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm font-semibold">
                 Create login
               </button>
-              <Link
-                href="/help"
-                className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl text-sm font-semibold"
-              >
+              <Link href="/help" className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl text-sm font-semibold">
                 How to use Rentozi
               </Link>
-              <button
-                type="button"
-                onClick={() => handleDelete(editing.id)}
-                className="border border-red-200 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-semibold"
-              >
+              <button type="button" onClick={() => handleDelete(editing.id)} className="border border-red-200 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-semibold">
                 Delete
               </button>
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                className="text-slate-500 hover:bg-slate-100 px-4 py-2 rounded-xl text-sm font-semibold"
-              >
+              <button type="button" onClick={() => setEditing(null)} className="text-slate-500 hover:bg-slate-100 px-4 py-2 rounded-xl text-sm font-semibold">
                 Cancel
               </button>
             </div>
@@ -563,9 +495,7 @@ export default function DashboardPage() {
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
             <div className="flex gap-2">
               <button className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save</button>
-              <button type="button" onClick={() => setShowAdd(false)} className="text-slate-500 text-sm">
-                Cancel
-              </button>
+              <button type="button" onClick={() => setShowAdd(false)} className="text-slate-500 text-sm">Cancel</button>
             </div>
           </form>
         </div>
