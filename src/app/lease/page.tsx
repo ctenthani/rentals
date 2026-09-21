@@ -41,7 +41,8 @@ export default function LeasePage() {
 
       const { data: ownLl } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
       const { data: mem } = await supabase.from("landlord_members").select("landlord_id").eq("auth_user_id", session.user.id).maybeSingle();
-      const landlordMode = !!(ownLl || mem);
+            const isOwnLease = t.auth_user_id === session.user.id;
+      const landlordMode = !!(ownLl || mem) && !isOwnLease;
       setIsLandlord(landlordMode);
 
       let tid = tenantIdParam;
