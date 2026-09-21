@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
@@ -10,8 +10,6 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 export default function LeasePage() {
-  const params = useSearchParams();
-  const tenantIdParam = params.get("tenant_id");
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -44,13 +42,16 @@ export default function LeasePage() {
         return;
       }
 
+      const q = new URLSearchParams(window.location.search);
+      const tenantIdParam = q.get("tenant_id");
+
       const { data: myTenant } = await supabase
         .from("tenants")
         .select("id")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
 
-      let tid = tenantIdParam || myTenant?.id || null;
+      const tid = tenantIdParam || myTenant?.id || null;
       if (!tid) {
         setError("No tenant selected");
         setLoading(false);
@@ -68,10 +69,10 @@ export default function LeasePage() {
         return;
       }
 
-      const isOwn = t.auth_user_id && t.auth_user_id === session.user.id;
-      setTenantMode(!!isOwn);
+      const isOwn = !!(t.auth_user_id && t.auth_user_id === session.user.id);
+      setTenantMode(isOwn);
 
-      if (!isOwn && t.auth_user_id && t.auth_user_id !== session.user.id) {
+      if (!isOwn) {
         const { data: ownLl } = await supabase
           .from("landlords")
           .select("id")
@@ -90,7 +91,8 @@ export default function LeasePage() {
       }
 
       setTenant(t);
-      setHouse(Array.isArray(t.houses) ? t.houses[0] : t.houses);
+      const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+      setHouse(h);
 
       const { data: ll } = await supabase
         .from("landlords")
@@ -109,12 +111,8 @@ export default function LeasePage() {
 
 Landlord: ${ll?.full_name || ""} (${ll?.business_name || ""})
 Tenant: ${t.full_name || ""}
-Property: ${Array.isArray(t.houses) ? t.houses[0]?.code : t.houses?.code} — ${
-        Array.isArray(t.houses) ? t.houses[0]?.name : t.houses?.name
-      }
-Monthly rent: MK ${Number(
-        (Array.isArray(t.houses) ? t.houses[0]?.monthly_rent : t.houses?.monthly_rent) || 0
-      ).toLocaleString()}
+Property: ${h?.code || ""} — ${h?.name || ""}
+Monthly rent: MK ${Number(h?.monthly_rent || 0).toLocaleString()}
 
 The tenant shall pay rent on or before the due date, keep the premises in good condition, and use the property as a private dwelling only.
 The landlord shall grant quiet enjoyment of the premises while rent is paid.
@@ -127,7 +125,7 @@ This agreement is governed by the laws of Malawi.`;
       setLandlordSig(lease?.landlord_signature || null);
       setLoading(false);
     })();
-  }, [router, tenantIdParam]);
+  }, [router]);
 
   function pos(e: any, canvas: HTMLCanvasElement) {
     const r = canvas.getBoundingClientRect();
@@ -167,7 +165,11 @@ This agreement is governed by the laws of Malawi.`;
     }
     const c = canvasRef.current;
     const drawn =
-      c && c.toDataURL().length > 4000 ? c.toDataURL("image/png") : tenantMode ? tenantSig : landlordSig;
+      c && c.toDataURL().length > 4000
+        ? c.toDataURL("image/png")
+        : tenantMode
+        ? tenantSig
+        : landlordSig;
     if (tenantMode && !drawn) {
       setError("Please sign in the box");
       return;
@@ -197,9 +199,17 @@ This agreement is governed by the laws of Malawi.`;
       landlord_signature: tenantMode ? landlordSig : drawn || landlordSig,
     };
 
-    const { error: uErr } = await supabase
+    const { data: existing } = await supabase
       .from("leases")
-      .upsert(payload, { onConflict: "tenant_id" });
+      .select("id")
+      .eq("tenant_id", tenant.id)
+      .maybeSingle();
+
+    const q = existing?.id
+      ? supabase.from("leases").update(payload).eq("id", existing.id)
+      : supabase.from("leases").insert(payload);
+
+    const { error: uErr } = await q;
     setSaving(false);
     if (uErr) {
       setError(uErr.message);
@@ -273,27 +283,19 @@ This agreement is governed by the laws of Malawi.`;
               You can only add your ID and signature. Lease wording is locked.
             </p>
           )}
-          <label className="text-xs font-semibold text-slate-500">
-            National ID / passport number
-          </label>
           <input
             className="w-full border rounded-xl px-3 py-2 text-sm disabled:bg-slate-100"
             value={idNumber}
             onChange={(e) => setIdNumber(e.target.value)}
             disabled={!tenantMode}
-            placeholder="ID or passport number"
+            placeholder="National ID / passport number"
           />
           {tenantMode && (
-            <>
-              <label className="text-xs font-semibold text-slate-500">
-                Upload National ID or passport
-              </label>
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                onChange={(e) => setIdFile(e.target.files?.[0] || null)}
-              />
-            </>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={(e) => setIdFile(e.target.files?.[0] || null)}
+            />
           )}
           {idPath && <p className="text-xs text-emerald-700">ID document on file</p>}
         </section>
