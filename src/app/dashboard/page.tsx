@@ -495,7 +495,7 @@ export default function DashboardPage() {
               value={loginPassword}
               onChange={(e) => setLoginPassword(e.target.value)}
             />
-                       <div className="flex flex-wrap items-center gap-2 pt-2">
+                                   <div className="flex flex-wrap items-center gap-2 pt-2">
               <button
                 onClick={handleSaveEdit}
                 disabled={saving}
@@ -515,7 +515,7 @@ export default function DashboardPage() {
                 href="/help"
                 className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl text-sm font-semibold"
               >
-                Rentozi Help
+                How to use Rentozi
               </Link>
               <button
                 type="button"
