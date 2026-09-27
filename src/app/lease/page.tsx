@@ -49,6 +49,17 @@ export default function LeasePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+      if (tenantMode && landlord?.email) {
+      await supabase.functions.invoke("send-email", {
+        body: {
+          to: landlord.email,
+          subject: `Lease signed — ${tenant.full_name} (${house?.code})`,
+          html: `<p>${tenant.full_name} saved ID and signature for
+            <strong>${house?.code} — ${house?.name}</strong>.</p>
+            <p><a href="https://rentozi.netlify.app/lease?tenant_id=${tenant.id}">Open lease</a></p>`,
+        },
+      });
+    }
   const [msg, setMsg] = useState<string | null>(null);
   const [tenantMode, setTenantMode] = useState(true);
 
