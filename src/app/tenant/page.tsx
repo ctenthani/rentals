@@ -45,14 +45,38 @@ function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number) {
   return months.join(", ");
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const s = (status || "upcoming").toLowerCase();
+  const cls =
+    s === "paid"
+      ? "bg-emerald-100 text-emerald-800"
+      : s === "overdue"
+      ? "bg-red-100 text-red-800"
+      : s === "due"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-slate-100 text-slate-700";
+  return (
+    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>
+      {s.toUpperCase()}
+    </span>
+  );
+}
+
+async function notifyOwner(supabase: any, to: string | null | undefined, subject: string, html: string) {
+  if (!to) return;
+  await supabase.functions.invoke("send-email", { body: { to, subject, html } });
+}
+
 export default function TenantPage() {
+  const router = useRouter();
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const [tab, setTab] = useState<"home" | "pay" | "issues">("home");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [tenant, setTenant] = useState<any>(null);
-  const [house, setHouse] = useState<any>(null);
-  const [balance, setBalance] = useState<any>(null);
+  const [units, setUnits] = useState<any[]>([]);
+  const [selectedId, setSelectedId] = useState("");
   const [landlord, setLandlord] = useState<any>(null);
   const [payments, setPayments] = useState<any[]>([]);
   const [isAlsoLandlord, setIsAlsoLandlord] = useState(false);
@@ -64,63 +88,83 @@ export default function TenantPage() {
   const [file, setFile] = useState<File | null>(null);
   const [issue, setIssue] = useState("");
 
-  const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const selected = units.find((u) => u.id === selectedId) || units[0];
 
-  async function load() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { router.push("/auth/login"); return; }
-
-    const { data: ownLl } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
-    const { data: mem } = await supabase.from("landlord_members").select("id").eq("auth_user_id", session.user.id).maybeSingle();
-    setIsAlsoLandlord(!!ownLl || !!mem);
-
-    const { data: t } = await supabase
-      .from("tenants")
-      .select("*, houses(id, name, code, monthly_rent, bank_account)")
-      .eq("auth_user_id", session.user.id)
-      .maybeSingle();
-    if (!t) { setError("No tenant profile linked to this login"); setLoading(false); return; }
-    setTenant(t);
-    const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
-    setHouse(h);
-
-    const { data: b } = await supabase.from("tenant_balances").select("*").eq("tenant_id", t.id).maybeSingle();
-    setBalance(b);
-
-    if (t.landlord_id) {
-      const { data: ll } = await supabase
-        .from("landlords")
-        .select("full_name, business_name, email, airtel_number, mpamba_number, bank_name, bank_account, payment_notes")
-        .eq("id", t.landlord_id)
-        .maybeSingle();
-      setLandlord(ll);
-    }
-
-    const { data: pays } = await supabase
+  async function loadPayments(tenantId: string) {
+    const { data } = await supabase
       .from("payments")
       .select("id, amount, paid_date, method, created_at")
-      .eq("tenant_id", t.id)
+      .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false });
-    setPayments(pays || []);
-    setLoading(false);
+    setPayments(data || []);
   }
 
-  useEffect(() => { load(); }, [router]);
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth/login");
+        return;
+      }
+
+      const { data: ownLl } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+      const { data: mem } = await supabase.from("landlord_members").select("id").eq("auth_user_id", session.user.id).limit(1);
+      setIsAlsoLandlord(!!ownLl || !!(mem && mem.length));
+
+      const { data: list } = await supabase
+        .from("tenants")
+        .select("id, full_name, phone, email, auth_user_id, landlord_id, house_id, houses(id, name, code, monthly_rent, bank_account)")
+        .eq("auth_user_id", session.user.id);
+
+      const mapped = await Promise.all(
+        (list || []).map(async (t: any) => {
+          const house = Array.isArray(t.houses) ? t.houses[0] : t.houses;
+          const { data: bal } = await supabase
+            .from("tenant_balances")
+            .select("*")
+            .eq("tenant_id", t.id)
+            .maybeSingle();
+          return { ...t, house, balance: bal };
+        })
+      );
+      setUnits(mapped);
+      const first = mapped[0]?.id || "";
+      setSelectedId(first);
+
+      if (mapped[0]?.landlord_id) {
+        const { data: ll } = await supabase
+          .from("landlords")
+          .select("full_name, business_name, email, airtel_number, mpamba_number, bank_name, bank_account")
+          .eq("id", mapped[0].landlord_id)
+          .maybeSingle();
+        setLandlord(ll);
+      }
+      if (first) await loadPayments(first);
+      setLoading(false);
+    })();
+  }, [router]);
+
+  useEffect(() => {
+    if (selectedId) loadPayments(selectedId);
+  }, [selectedId]);
 
   const submitPay = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
-    setError(null); setMsg(null);
+    if (!selected) return;
+    setError(null);
+    setMsg(null);
     let proof: string | null = null;
     if (file) {
-      const path = `${tenant.id}/${Date.now()}-${file.name}`;
+      const path = `${selected.id}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage.from("payment-proofs").upload(path, file);
-      if (upErr) { setError(upErr.message); return; }
+      if (upErr) {
+        setError(upErr.message);
+        return;
+      }
       proof = path;
     }
     const { error: insErr } = await supabase.from("payment_submissions").insert({
-      tenant_id: tenant.id,
+      tenant_id: selected.id,
       amount: Number(amount),
       method,
       reference_used: reference,
@@ -128,45 +172,63 @@ export default function TenantPage() {
       proof_path: proof,
       status: "pending",
     });
-    if (insErr) { setError(insErr.message); return; }
-    if (landlord?.email) {
-      await supabase.functions.invoke("send-email", {
-        body: {
-          to: landlord.email,
-          subject: `Payment to confirm: ${tenant.full_name}`,
-          html: `<p>${tenant.full_name} reported MK ${Number(amount).toLocaleString()} via ${method}. Open Pending in Rentozi.</p>`,
-        },
-      });
+    if (insErr) {
+      setError(insErr.message);
+      return;
     }
-    setMsg("Submitted. Wait for your landlord to confirm.");
-    setAmount(""); setReference(""); setFile(null);
+    await notifyOwner(
+      supabase,
+      landlord?.email,
+      `Payment to confirm — ${selected.full_name} (${selected.house?.code})`,
+      `<p>${selected.full_name} reported <strong>${formatMK(Number(amount))}</strong> via ${method}
+       for <strong>${selected.house?.code} — ${selected.house?.name}</strong>.</p>
+       <p>Reference: ${reference || "—"}</p>
+       <p><a href="https://rentozi.netlify.app/pending">Open Pending</a></p>`
+    );
+    setMsg("Submitted. Your landlord has been emailed.");
+    setAmount("");
+    setReference("");
+    setFile(null);
   };
 
   const submitIssue = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !issue.trim()) return;
-    await supabase.from("tenant_issues").insert({ tenant_id: tenant.id, message: issue, status: "open" });
-    if (landlord?.email) {
-      await supabase.functions.invoke("send-email", {
-        body: {
-          to: landlord.email,
-          subject: `Issue from ${tenant.full_name}`,
-          html: `<p>${issue}</p>`,
-        },
-      });
+    if (!selected || !issue.trim()) return;
+    setError(null);
+    const { error: iErr } = await supabase.from("tenant_issues").insert({
+      tenant_id: selected.id,
+      message: issue,
+      status: "open",
+    });
+    if (iErr) {
+      setError(iErr.message);
+      return;
     }
+    await notifyOwner(
+      supabase,
+      landlord?.email,
+      `Issue from ${selected.full_name} (${selected.house?.code})`,
+      `<p><strong>${selected.house?.code} — ${selected.house?.name}</strong></p>
+       <p>${issue}</p>
+       <p>${selected.full_name} ${selected.phone || ""}</p>`
+    );
     setIssue("");
-    setMsg("Issue sent to your landlord.");
+    setMsg("Issue sent. Your landlord has been emailed.");
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
+  }
+  if (!selected) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">No properties linked to this login.</div>;
+  }
 
-  const status = computeStatus(balance?.next_due_date || null, Number(balance?.current_balance || 0));
+  const status = computeStatus(selected.balance?.next_due_date || null, Number(selected.balance?.current_balance || 0));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50">
       <header className="bg-white border-b sticky top-0 z-30">
-        <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between gap-2">
+        <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
           <p className="font-bold truncate">{landlord?.business_name || "My rent"}</p>
           <div className="flex gap-2 text-xs">
             {isAlsoLandlord && <Link href="/dashboard" className="text-emerald-700 font-semibold">Landlord</Link>}
@@ -174,12 +236,23 @@ export default function TenantPage() {
             <button onClick={async () => { await supabase.auth.signOut(); router.push("/auth/login"); }} className="text-slate-500">Logout</button>
           </div>
         </div>
-        <div className="max-w-lg mx-auto px-4 flex gap-2 pb-2">
-          {(["home", "pay", "issues"] as const).map((k) => (
-            <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-lg text-sm capitalize ${tab === k ? "bg-emerald-100 text-emerald-900 font-semibold" : "text-slate-600"}`}>
-              {k === "home" ? "Home" : k === "pay" ? "Pay" : "Issues"}
-            </button>
-          ))}
+        <div className="max-w-lg mx-auto px-4 pb-3 space-y-2">
+          {units.length > 1 && (
+            <select className="w-full border rounded-xl px-3 py-2 text-sm bg-white" value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.house?.code} — {u.house?.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="flex gap-2">
+            {(["home", "pay", "issues"] as const).map((k) => (
+              <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-lg text-sm capitalize ${tab === k ? "bg-emerald-100 text-emerald-900 font-semibold" : "text-slate-600"}`}>
+                {k === "home" ? "Home" : k === "pay" ? "Pay" : "Issues"}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -192,21 +265,16 @@ export default function TenantPage() {
             <section className="bg-white rounded-2xl border p-5 space-y-2">
               <div className="flex justify-between items-start">
                 <div>
-                  <p className="font-bold">{tenant?.full_name}</p>
-                  <p className="text-xs text-slate-500">{house?.code} · {house?.name}</p>
+                  <p className="font-bold">{selected.full_name}</p>
+                  <p className="text-xs text-slate-500">{selected.house?.code} · {selected.house?.name}</p>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  status === "paid" ? "bg-emerald-100 text-emerald-800" :
-                  status === "overdue" ? "bg-red-100 text-red-800" :
-                  status === "due" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"
-                }`}>{status.toUpperCase()}</span>
+                <StatusBadge status={status} />
               </div>
-              <p className="text-sm">Rent {formatMK(Number(house?.monthly_rent || 0))}</p>
-              <p className="text-sm">Next due: <strong>{balance?.next_due_date || "Not set"}</strong></p>
-              <p className="text-sm">Paid months: {getPaidMonths(balance?.next_due_date, Number(balance?.months_in_advance || 0))}</p>
-              <Link href={`/lease?tenant_id=${tenant?.id}`} className="inline-block text-sm text-sky-700 font-semibold">View / sign lease</Link>
+              <p className="text-sm">Rent {formatMK(Number(selected.house?.monthly_rent || 0))}</p>
+              <p className="text-sm">Next due: <strong>{selected.balance?.next_due_date || "Not set"}</strong></p>
+              <p className="text-sm">Paid months: {getPaidMonths(selected.balance?.next_due_date, Number(selected.balance?.months_in_advance || 0))}</p>
+              <Link href={`/lease?tenant_id=${selected.id}`} className="inline-block text-sm text-sky-700 font-semibold">View / sign lease</Link>
             </section>
-
             <section className="bg-white rounded-2xl border p-5 space-y-3">
               <h2 className="font-bold">Receipts</h2>
               {payments.length === 0 && <p className="text-sm text-slate-500">No confirmed receipts yet.</p>}
@@ -216,12 +284,7 @@ export default function TenantPage() {
                     <p className="font-semibold">{formatMK(Number(p.amount))}</p>
                     <p className="text-[11px] text-slate-500">{p.paid_date || p.created_at?.slice(0, 10)} · {p.method || ""}</p>
                   </div>
-                  <Link
-                    href={`/receipt?id=${p.id}`}
-                    className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
-                  >
-                    Open / print
-                  </Link>
+                  <Link href={`/receipt?id=${p.id}`} className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Open / print</Link>
                 </div>
               ))}
             </section>
@@ -233,11 +296,9 @@ export default function TenantPage() {
             <h2 className="font-bold">Report a payment</h2>
             <div className="text-sm bg-slate-50 rounded-xl p-3 space-y-1">
               <p className="font-semibold">Pay to</p>
-              {landlord?.bank_name && <p>Bank: {landlord.bank_name} {landlord.bank_account}</p>}
-              {house?.bank_account && <p>Account: {house.bank_account}</p>}
+              {selected.house?.bank_account && <p>Account: {selected.house.bank_account}</p>}
               {landlord?.airtel_number && <p>Airtel: {landlord.airtel_number}</p>}
               {landlord?.mpamba_number && <p>Mpamba: {landlord.mpamba_number}</p>}
-              {landlord?.payment_notes && <p className="text-xs text-slate-500">{landlord.payment_notes}</p>}
             </div>
             <input required type="number" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
             <select className="w-full border rounded-xl px-3 py-2 text-sm" value={method} onChange={(e) => setMethod(e.target.value)}>
