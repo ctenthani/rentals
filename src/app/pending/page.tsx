@@ -28,7 +28,9 @@ export default function PendingPage() {
   const [working, setWorking] = useState<string | null>(null);
 
   async function load() {
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     if (!session) {
       router.push("/auth/login");
       return;
@@ -48,7 +50,9 @@ export default function PendingPage() {
     }
     const { data, error: qErr } = await supabase
       .from("payment_submissions")
-      .select("id, amount, method, reference_used, paid_date, status, created_at, proof_path, tenant_id, tenants(full_name, email, phone, houses(name, code))")
+      .select(
+        "id, amount, method, reference_used, paid_date, status, created_at, proof_path, tenant_id, tenants(full_name, email, phone, houses(name, code))"
+      )
       .in("tenant_id", ids)
       .eq("status", "pending")
       .order("created_at", { ascending: false });
@@ -65,13 +69,14 @@ export default function PendingPage() {
     const t = row.tenants;
     return Array.isArray(t) ? t[0] : t;
   };
+
   const houseOf = (row: any) => {
     const t = tenantOf(row);
     const h = t?.houses;
     return Array.isArray(h) ? h[0] : h;
   };
 
-    const decide = async (id: string, status: "confirmed" | "rejected") => {
+  const decide = async (id: string, status: "confirmed" | "rejected") => {
     setWorking(id);
     const row = items.find((x) => x.id === id);
     const t = row ? tenantOf(row) : null;
@@ -98,11 +103,10 @@ export default function PendingPage() {
       paymentId = pay?.id || null;
     }
     if (t?.email) {
-          if (t?.email) {
       const receiptLink = paymentId
         ? `https://rentozi.netlify.app/receipt?id=${paymentId}`
         : "https://rentozi.netlify.app/tenant";
-      const months = Number(row.months_covered || 0);
+      const months = Number(row?.months_covered || 0);
       await supabase.functions.invoke("send-email", {
         body: {
           to: t.email,
@@ -126,13 +130,17 @@ export default function PendingPage() {
     await load();
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-4">
-          <Link href="/dashboard" className="text-sm text-slate-600">← Dashboard</Link>
+          <Link href="/dashboard" className="text-sm text-slate-600">
+            ← Dashboard
+          </Link>
           <p className="font-bold">Pending payments</p>
         </div>
       </header>
@@ -147,16 +155,28 @@ export default function PendingPage() {
               <div className="flex justify-between gap-3">
                 <div>
                   <p className="font-bold">{t?.full_name || "Tenant"}</p>
-                  <p className="text-xs text-slate-500">{h?.code} — {h?.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {h?.code} — {h?.name}
+                  </p>
                 </div>
                 <p className="font-bold text-emerald-700">{formatMK(Number(row.amount))}</p>
               </div>
-              <p className="text-sm text-slate-600">{row.method} · {row.paid_date} · {row.reference_used || "no ref"}</p>
+              <p className="text-sm text-slate-600">
+                {row.method} · {row.paid_date} · {row.reference_used || "no ref"}
+              </p>
               <div className="flex gap-2 pt-1">
-                <button disabled={working === row.id} onClick={() => decide(row.id, "confirmed")} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm">
+                <button
+                  disabled={working === row.id}
+                  onClick={() => decide(row.id, "confirmed")}
+                  className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm"
+                >
                   Confirm
                 </button>
-                <button disabled={working === row.id} onClick={() => decide(row.id, "rejected")} className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm">
+                <button
+                  disabled={working === row.id}
+                  onClick={() => decide(row.id, "rejected")}
+                  className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm"
+                >
                   Reject
                 </button>
               </div>
