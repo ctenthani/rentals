@@ -46,20 +46,10 @@ function money(n: any) {
 export default function LeasePage() {
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-      if (tenantMode && landlord?.email) {
-      await supabase.functions.invoke("send-email", {
-        body: {
-          to: landlord.email,
-          subject: `Lease signed — ${tenant.full_name} (${house?.code})`,
-          html: `<p>${tenant.full_name} saved ID and signature for
-            <strong>${house?.code} — ${house?.name}</strong>.</p>
-            <p><a href="https://rentozi.netlify.app/lease?tenant_id=${tenant.id}">Open lease</a></p>`,
-        },
-      });
-    }
   const [msg, setMsg] = useState<string | null>(null);
   const [tenantMode, setTenantMode] = useState(true);
 
@@ -81,6 +71,7 @@ export default function LeasePage() {
     landlord_signature: "" as string | null,
   });
   const [idFile, setIdFile] = useState<File | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
 
@@ -88,28 +79,56 @@ export default function LeasePage() {
 
   useEffect(() => {
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push("/auth/login"); return; }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth/login");
+        return;
+      }
 
-      const tid =
-        new URLSearchParams(window.location.search).get("tenant_id") ||
-        (await supabase.from("tenants").select("id").eq("auth_user_id", session.user.id).maybeSingle()).data?.id;
-
-      if (!tid) { setError("No tenant selected"); setLoading(false); return; }
+      const tidFromUrl = new URLSearchParams(window.location.search).get("tenant_id");
+      const { data: myTenants } = await supabase
+        .from("tenants")
+        .select("id")
+        .eq("auth_user_id", session.user.id);
+      const tid = tidFromUrl || myTenants?.[0]?.id || null;
+      if (!tid) {
+        setError("No tenant selected");
+        setLoading(false);
+        return;
+      }
 
       const { data: t } = await supabase
         .from("tenants")
         .select("*, houses(id, name, code, monthly_rent, bank_account)")
         .eq("id", tid)
         .maybeSingle();
-      if (!t) { setError("Tenant not found"); setLoading(false); return; }
+      if (!t) {
+        setError("Tenant not found");
+        setLoading(false);
+        return;
+      }
 
       const isOwn = !!(t.auth_user_id && t.auth_user_id === session.user.id);
       setTenantMode(isOwn);
+
       if (!isOwn) {
-        const { data: ownLl } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
-        const { data: mem } = await supabase.from("landlord_members").select("id").eq("auth_user_id", session.user.id).maybeSingle();
-        if (!ownLl && !mem) { setError("You can only open your own lease"); setLoading(false); return; }
+        const { data: ownLl } = await supabase
+          .from("landlords")
+          .select("id")
+          .eq("auth_user_id", session.user.id)
+          .maybeSingle();
+        const { data: mem } = await supabase
+          .from("landlord_members")
+          .select("id")
+          .eq("auth_user_id", session.user.id)
+          .limit(1);
+        if (!ownLl && !(mem && mem.length)) {
+          setError("You can only open your own lease");
+          setLoading(false);
+          return;
+        }
       }
 
       setTenant(t);
@@ -118,7 +137,7 @@ export default function LeasePage() {
 
       const { data: ll } = await supabase
         .from("landlords")
-        .select("full_name, business_name")
+        .select("full_name, business_name, email")
         .eq("id", t.landlord_id)
         .maybeSingle();
       setLandlord(ll);
@@ -151,22 +170,33 @@ export default function LeasePage() {
     const src = e.touches ? e.touches[0] : e;
     return { x: src.clientX - r.left, y: src.clientY - r.top };
   }
+
   const startDraw = (e: any) => {
-    const c = canvasRef.current; if (!c) return;
+    const c = canvasRef.current;
+    if (!c) return;
     drawing.current = true;
     const p = pos(e, c);
     const ctx = c.getContext("2d")!;
-    ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
   };
+
   const moveDraw = (e: any) => {
     if (!drawing.current) return;
-    const c = canvasRef.current; if (!c) return;
+    const c = canvasRef.current;
+    if (!c) return;
     const p = pos(e, c);
     const ctx = c.getContext("2d")!;
-    ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#0f172a";
-    ctx.lineTo(p.x, p.y); ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
   };
-  const endDraw = () => { drawing.current = false; };
+
+  const endDraw = () => {
+    drawing.current = false;
+  };
 
   const save = async () => {
     if (!tenant) return;
@@ -175,15 +205,28 @@ export default function LeasePage() {
       return;
     }
     const c = canvasRef.current;
-    const drawn = c && c.toDataURL().length > 4000 ? c.toDataURL("image/png") : tenantMode ? form.tenant_signature : form.landlord_signature;
-    if (tenantMode && !drawn) { setError("Please sign in the box"); return; }
+    const drawn =
+      c && c.toDataURL().length > 4000
+        ? c.toDataURL("image/png")
+        : tenantMode
+        ? form.tenant_signature
+        : form.landlord_signature;
+    if (tenantMode && !drawn) {
+      setError("Please sign in the box");
+      return;
+    }
 
-    setSaving(true); setError(null);
+    setSaving(true);
+    setError(null);
     let docPath = form.id_doc_path;
     if (tenantMode && idFile) {
       const path = `ids/${tenant.id}/${Date.now()}-${idFile.name}`;
       const { error: upErr } = await supabase.storage.from("lease-docs").upload(path, idFile, { upsert: true });
-      if (upErr) { setSaving(false); setError(upErr.message); return; }
+      if (upErr) {
+        setSaving(false);
+        setError(upErr.message);
+        return;
+      }
       docPath = path;
     }
 
@@ -208,14 +251,30 @@ export default function LeasePage() {
       ? supabase.from("leases").update(payload).eq("id", existing.id)
       : supabase.from("leases").insert(payload);
     const { error: uErr } = await q;
-    setSaving(false);
-    if (uErr) { setError(uErr.message); return; }
+    if (uErr) {
+      setSaving(false);
+      setError(uErr.message);
+      return;
+    }
+
+    if (tenantMode && landlord?.email) {
+      await supabase.functions.invoke("send-email", {
+        body: {
+          to: landlord.email,
+          subject: `Lease signed — ${tenant.full_name} (${house?.code})`,
+          html: `<p>${tenant.full_name} saved ID and signature for <strong>${house?.code} — ${house?.name}</strong>.</p>
+                 <p><a href="https://rentozi.netlify.app/lease?tenant_id=${tenant.id}">Open lease</a></p>`,
+        },
+      });
+    }
+
     setForm((p) => ({
       ...p,
       id_doc_path: docPath,
       tenant_signature: tenantMode ? drawn : p.tenant_signature,
       landlord_signature: tenantMode ? p.landlord_signature : drawn,
     }));
+    setSaving(false);
     setMsg(tenantMode ? "ID and signature saved" : "Lease saved");
   };
 
@@ -234,10 +293,14 @@ export default function LeasePage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-emerald-50 to-sky-50">
       <header className="bg-white/90 backdrop-blur border-b sticky top-0 z-30 print:hidden">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href={tenantMode ? "/tenant" : "/dashboard"} className="text-sm text-slate-600">← Back</Link>
+          <Link href={tenantMode ? "/tenant" : "/dashboard"} className="text-sm text-slate-600">
+            ← Back
+          </Link>
           <p className="font-bold">Lease</p>
           <div className="flex gap-2">
-            <button onClick={() => window.print()} className="border px-3 py-1.5 rounded-xl text-sm">Print / PDF</button>
+            <button onClick={() => window.print()} className="border px-3 py-1.5 rounded-xl text-sm">
+              Print / PDF
+            </button>
             <button onClick={save} disabled={saving} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-sm font-semibold">
               {saving ? "Saving..." : tenantMode ? "Save ID & signature" : "Save lease"}
             </button>
@@ -279,7 +342,12 @@ export default function LeasePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 print:hidden">
             <Field label="National ID / passport number">
-              <input className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-slate-100" value={form.id_number} onChange={(e) => setF("id_number", e.target.value)} disabled={!tenantMode} />
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-slate-100"
+                value={form.id_number}
+                onChange={(e) => setF("id_number", e.target.value)}
+                disabled={!tenantMode}
+              />
             </Field>
             <Field label="Move-in date">
               <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-slate-100" value={form.move_in} onChange={(e) => setF("move_in", e.target.value)} disabled={tenantMode} />
@@ -337,18 +405,38 @@ export default function LeasePage() {
               <p className="text-[10px] font-bold uppercase text-slate-500 mb-2">Tenant signature</p>
               {form.tenant_signature && <img src={form.tenant_signature} alt="tenant signature" className="h-14 object-contain mb-2" />}
               {tenantMode && (
-                <canvas ref={canvasRef} width={400} height={140} className="w-full border rounded-xl bg-white touch-none print:hidden"
-                  onMouseDown={startDraw} onMouseMove={moveDraw} onMouseUp={endDraw} onMouseLeave={endDraw}
-                  onTouchStart={startDraw} onTouchMove={moveDraw} onTouchEnd={endDraw} />
+                <canvas
+                  ref={canvasRef}
+                  width={400}
+                  height={140}
+                  className="w-full border rounded-xl bg-white touch-none print:hidden"
+                  onMouseDown={startDraw}
+                  onMouseMove={moveDraw}
+                  onMouseUp={endDraw}
+                  onMouseLeave={endDraw}
+                  onTouchStart={startDraw}
+                  onTouchMove={moveDraw}
+                  onTouchEnd={endDraw}
+                />
               )}
             </div>
             <div>
               <p className="text-[10px] font-bold uppercase text-slate-500 mb-2">Landlord signature</p>
               {form.landlord_signature && <img src={form.landlord_signature} alt="landlord signature" className="h-14 object-contain mb-2" />}
               {!tenantMode && (
-                <canvas ref={canvasRef} width={400} height={140} className="w-full border rounded-xl bg-white touch-none print:hidden"
-                  onMouseDown={startDraw} onMouseMove={moveDraw} onMouseUp={endDraw} onMouseLeave={endDraw}
-                  onTouchStart={startDraw} onTouchMove={moveDraw} onTouchEnd={endDraw} />
+                <canvas
+                  ref={canvasRef}
+                  width={400}
+                  height={140}
+                  className="w-full border rounded-xl bg-white touch-none print:hidden"
+                  onMouseDown={startDraw}
+                  onMouseMove={moveDraw}
+                  onMouseUp={endDraw}
+                  onMouseLeave={endDraw}
+                  onTouchStart={startDraw}
+                  onTouchMove={moveDraw}
+                  onTouchEnd={endDraw}
+                />
               )}
             </div>
           </div>
