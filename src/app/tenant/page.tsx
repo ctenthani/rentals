@@ -72,7 +72,9 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{s.toUpperCase()}</span>;
 }
 
-async function notifyOwner(supabase: any, to: string | null | undefined, subject: string, html: string) {
+async function notifyOwner(supabase: any, tenantId: string, fallbackEmail: string | null | undefined, subject: string, html: string) {
+  const { data: rpcEmail } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
+  const to = (rpcEmail || fallbackEmail || "").trim();
   if (!to) return { ok: false, error: "Landlord has no email in Settings" };
   const { data, error } = await supabase.functions.invoke("send-email", {
     body: { to, subject, html },
@@ -186,9 +188,7 @@ export default function TenantPage() {
       setError(insErr.message);
       return;
     }
-    const mail = await notifyOwner(
-      supabase,
-      landlord?.email,
+    const mail = await notifyOwner(supabase, selected.id, landlord?.email, subject, html)
       `Payment to confirm — ${selected.full_name} (${selected.house?.code})`,
       `<p>${selected.full_name} reported <strong>${formatMK(Number(amount))}</strong> via ${method}
        for <strong>${selected.house?.code} — ${selected.house?.name}</strong>.</p>
