@@ -72,9 +72,15 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{s.toUpperCase()}</span>;
 }
 
-async function notifyOwner(supabase: any, tenantId: string, fallbackEmail: string | null | undefined, subject: string, html: string) {
+async function notifyOwner(
+  supabase: any,
+  tenantId: string,
+  fallbackEmail: string | null | undefined,
+  subject: string,
+  html: string
+) {
   const { data: rpcEmail } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
-  const to = (rpcEmail || fallbackEmail || "").trim();
+  const to = String(rpcEmail || fallbackEmail || "").trim();
   if (!to) return { ok: false, error: "Landlord has no email in Settings" };
   const { data, error } = await supabase.functions.invoke("send-email", {
     body: { to, subject, html },
@@ -118,24 +124,41 @@ export default function TenantPage() {
 
   useEffect(() => {
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
         router.push("/auth/login");
         return;
       }
-      const { data: ownLl } = await supabase.from("landlords").select("id").eq("auth_user_id", session.user.id).maybeSingle();
-      const { data: mem } = await supabase.from("landlord_members").select("id").eq("auth_user_id", session.user.id).limit(1);
+
+      const { data: ownLl } = await supabase
+        .from("landlords")
+        .select("id")
+        .eq("auth_user_id", session.user.id)
+        .maybeSingle();
+      const { data: mem } = await supabase
+        .from("landlord_members")
+        .select("id")
+        .eq("auth_user_id", session.user.id)
+        .limit(1);
       setIsAlsoLandlord(!!ownLl || !!(mem && mem.length));
 
       const { data: list } = await supabase
         .from("tenants")
-        .select("id, full_name, phone, email, auth_user_id, landlord_id, house_id, houses(id, name, code, monthly_rent, bank_account)")
+        .select(
+          "id, full_name, phone, email, auth_user_id, landlord_id, house_id, houses(id, name, code, monthly_rent, bank_account)"
+        )
         .eq("auth_user_id", session.user.id);
 
       const mapped = await Promise.all(
         (list || []).map(async (t: any) => {
           const house = Array.isArray(t.houses) ? t.houses[0] : t.houses;
-          const { data: bal } = await supabase.from("tenant_balances").select("*").eq("tenant_id", t.id).maybeSingle();
+          const { data: bal } = await supabase
+            .from("tenant_balances")
+            .select("*")
+            .eq("tenant_id", t.id)
+            .maybeSingle();
           return { ...t, house, balance: bal };
         })
       );
@@ -188,7 +211,10 @@ export default function TenantPage() {
       setError(insErr.message);
       return;
     }
-    const mail = await notifyOwner(supabase, selected.id, landlord?.email, subject, html)
+    const mail = await notifyOwner(
+      supabase,
+      selected.id,
+      landlord?.email,
       `Payment to confirm — ${selected.full_name} (${selected.house?.code})`,
       `<p>${selected.full_name} reported <strong>${formatMK(Number(amount))}</strong> via ${method}
        for <strong>${selected.house?.code} — ${selected.house?.name}</strong>.</p>
@@ -216,16 +242,27 @@ export default function TenantPage() {
     }
     const mail = await notifyOwner(
       supabase,
+      selected.id,
       landlord?.email,
       `Issue from ${selected.full_name} (${selected.house?.code})`,
-      `<p><strong>${selected.house?.code} — ${selected.house?.name}</strong></p><p>${issue}</p><p>${selected.full_name} ${selected.phone || ""}</p>`
+      `<p><strong>${selected.house?.code} — ${selected.house?.name}</strong></p>
+       <p>${issue}</p>
+       <p>${selected.full_name} ${selected.phone || ""}</p>`
     );
     setIssue("");
     setMsg(mail.ok ? "Issue sent. Your landlord was emailed." : `Saved, but email failed: ${mail.error}`);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
-  if (!selected) return <div className="min-h-screen flex items-center justify-center text-slate-500">No properties linked to this login.</div>;
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
+  }
+  if (!selected) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-500">
+        No properties linked to this login.
+      </div>
+    );
+  }
 
   const status = computeStatus(selected.balance?.next_due_date || null, Number(selected.balance?.current_balance || 0));
   const months = cycleMonths(selected.balance?.next_due_date, Number(selected.balance?.months_in_advance || 0));
@@ -236,22 +273,48 @@ export default function TenantPage() {
         <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
           <p className="font-bold truncate">{landlord?.business_name || "My rent"}</p>
           <div className="flex gap-2 text-xs">
-            {isAlsoLandlord && <Link href="/dashboard" className="text-emerald-700 font-semibold">Landlord</Link>}
-            <Link href="/help" className="text-slate-600">Help</Link>
-            <button onClick={async () => { await supabase.auth.signOut(); router.push("/auth/login"); }} className="text-slate-500">Logout</button>
+            {isAlsoLandlord && (
+              <Link href="/dashboard" className="text-emerald-700 font-semibold">
+                Landlord
+              </Link>
+            )}
+            <Link href="/help" className="text-slate-600">
+              Help
+            </Link>
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.push("/auth/login");
+              }}
+              className="text-slate-500"
+            >
+              Logout
+            </button>
           </div>
         </div>
         <div className="max-w-lg mx-auto px-4 pb-3 space-y-2">
           {units.length > 1 && (
-            <select className="w-full border rounded-xl px-3 py-2 text-sm bg-white" value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+            <select
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-white"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
               {units.map((u) => (
-                <option key={u.id} value={u.id}>{u.house?.code} — {u.house?.name}</option>
+                <option key={u.id} value={u.id}>
+                  {u.house?.code} — {u.house?.name}
+                </option>
               ))}
             </select>
           )}
           <div className="flex gap-2">
             {(["home", "pay", "issues"] as const).map((k) => (
-              <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-lg text-sm capitalize ${tab === k ? "bg-emerald-100 text-emerald-900 font-semibold" : "text-slate-600"}`}>
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className={`px-3 py-1.5 rounded-lg text-sm capitalize ${
+                  tab === k ? "bg-emerald-100 text-emerald-900 font-semibold" : "text-slate-600"
+                }`}
+              >
                 {k === "home" ? "Home" : k === "pay" ? "Pay" : "Issues"}
               </button>
             ))}
@@ -269,18 +332,25 @@ export default function TenantPage() {
               <div className="flex justify-between items-start">
                 <div>
                   <p className="font-bold">{selected.full_name}</p>
-                  <p className="text-xs text-slate-500">{selected.house?.code} · {selected.house?.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {selected.house?.code} · {selected.house?.name}
+                  </p>
                 </div>
                 <StatusBadge status={status} />
               </div>
               <p className="text-sm">Rent {formatMK(Number(selected.house?.monthly_rent || 0))}</p>
-              <p className="text-sm">Next due <strong>{selected.balance?.next_due_date || "Not set"}</strong></p>
+              <p className="text-sm">
+                Next due <strong>{selected.balance?.next_due_date || "Not set"}</strong>
+              </p>
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">This cycle</p>
                 <MonthPills months={months} />
               </div>
-              <Link href={`/lease?tenant_id=${selected.id}`} className="inline-block text-sm text-sky-700 font-semibold">View / sign lease</Link>
+              <Link href={`/lease?tenant_id=${selected.id}`} className="inline-block text-sm text-sky-700 font-semibold">
+                View / sign lease
+              </Link>
             </section>
+
             <section className="bg-white rounded-2xl border p-5 space-y-3">
               <h2 className="font-bold">Receipts</h2>
               {payments.length === 0 && <p className="text-sm text-slate-500">No confirmed receipts yet.</p>}
@@ -288,9 +358,13 @@ export default function TenantPage() {
                 <div key={p.id} className="flex items-center justify-between border rounded-xl px-3 py-2 text-sm">
                   <div>
                     <p className="font-semibold">{formatMK(Number(p.amount))}</p>
-                    <p className="text-[11px] text-slate-500">{p.paid_date || p.created_at?.slice(0, 10)} · {p.method || ""}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {p.paid_date || p.created_at?.slice(0, 10)} · {p.method || ""}
+                    </p>
                   </div>
-                  <Link href={`/receipt?id=${p.id}`} className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Open / print</Link>
+                  <Link href={`/receipt?id=${p.id}`} className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">
+                    Open / print
+                  </Link>
                 </div>
               ))}
             </section>
@@ -306,14 +380,26 @@ export default function TenantPage() {
               {landlord?.airtel_number && <p>Airtel: {landlord.airtel_number}</p>}
               {landlord?.mpamba_number && <p>Mpamba: {landlord.mpamba_number}</p>}
             </div>
-            <input required type="number" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <input
+              required
+              type="number"
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Amount"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
             <select className="w-full border rounded-xl px-3 py-2 text-sm" value={method} onChange={(e) => setMethod(e.target.value)}>
               <option>Airtel Money</option>
               <option>Mpamba</option>
               <option>Bank</option>
               <option>Cash</option>
             </select>
-            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Transaction ID" value={reference} onChange={(e) => setReference(e.target.value)} />
+            <input
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Transaction ID"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
             <input type="date" className="w-full border rounded-xl px-3 py-2 text-sm" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
             <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             <button className="w-full bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold">Submit for confirmation</button>
@@ -323,7 +409,14 @@ export default function TenantPage() {
         {tab === "issues" && (
           <form onSubmit={submitIssue} className="bg-white rounded-2xl border p-5 space-y-3">
             <h2 className="font-bold">Report an issue</h2>
-            <textarea required rows={5} className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Describe the problem" value={issue} onChange={(e) => setIssue(e.target.value)} />
+            <textarea
+              required
+              rows={5}
+              className="w-full border rounded-xl px-3 py-2 text-sm"
+              placeholder="Describe the problem"
+              value={issue}
+              onChange={(e) => setIssue(e.target.value)}
+            />
             <button className="w-full bg-slate-800 text-white py-2.5 rounded-xl text-sm font-semibold">Send to landlord</button>
           </form>
         )}
