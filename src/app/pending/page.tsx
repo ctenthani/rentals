@@ -98,17 +98,26 @@ export default function PendingPage() {
       paymentId = pay?.id || null;
     }
     if (t?.email) {
+          if (t?.email) {
       const receiptLink = paymentId
         ? `https://rentozi.netlify.app/receipt?id=${paymentId}`
         : "https://rentozi.netlify.app/tenant";
+      const months = Number(row.months_covered || 0);
       await supabase.functions.invoke("send-email", {
         body: {
           to: t.email,
-          subject: status === "confirmed" ? "Payment confirmed — receipt attached" : "Payment not accepted",
+          subject: status === "confirmed" ? "Your rent payment has been confirmed" : "Payment not accepted",
           html:
             status === "confirmed"
-              ? `<p>Your payment of <strong>${formatMK(Number(row.amount))}</strong> for ${h?.code || ""} was confirmed.</p>
-                 <p><a href="${receiptLink}">Open / print your receipt</a></p>`
+              ? `<p>Your rent payment has been received and confirmed.</p>
+                 <p>Amount: <strong>${formatMK(Number(row.amount))}</strong><br/>
+                 Property: ${h?.name || h?.code || "—"}<br/>
+                 Date: ${row.paid_date || new Date().toISOString().slice(0, 10)}<br/>
+                 Method: ${row.method || "Tenant submission"}<br/>
+                 Months covered: ${months || "—"}</p>
+                 <p>View / print your receipt:<br/>
+                 <a href="${receiptLink}">${receiptLink}</a></p>
+                 <p>Thank you.</p>`
               : `<p>Your payment of ${formatMK(Number(row.amount))} was not accepted. Contact your landlord.</p>`,
         },
       });
