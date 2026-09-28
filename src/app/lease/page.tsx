@@ -203,7 +203,7 @@ export default function LeasePage() {
       }
       docPath = path;
     }
-    const payload: any = {
+        const payload: any = {
       tenant_id: tenant.id,
       terms: form.terms,
       id_number: form.id_number,
@@ -211,6 +211,8 @@ export default function LeasePage() {
       move_in: form.move_in || null,
       lease_start: form.lease_start || null,
       lease_end: form.lease_end || null,
+      start_date: form.lease_start || form.move_in || null,
+      end_date: form.lease_end || null,
       monthly_rent: Number(form.monthly_rent || 0),
       deposit: Number(form.deposit || 0),
       payment_day: Number(form.payment_day || 1),
