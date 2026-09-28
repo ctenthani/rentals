@@ -213,7 +213,7 @@ export default function LeasePage() {
       move_in: form.move_in || null,
       lease_start: form.lease_start || null,
       lease_end: form.lease_end || null,
-      start_date: form.lease_start || form.move_in || null,
+            start_date: form.lease_start || form.move_in || null,
       end_date: form.lease_end || null,
       lease_start: form.lease_start || null,
       lease_end: form.lease_end || null,
