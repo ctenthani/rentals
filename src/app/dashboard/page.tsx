@@ -105,13 +105,8 @@ export default function DashboardPage() {
       .eq("auth_user_id", session.user.id);
     const tenantRow = tenantRows?.[0] || null;
 
-    const { data: mem } = await supabase
-      .from("landlord_members")
-      .select("landlord_id")
-      .eq("auth_user_id", session.user.id)
-      .limit(1);
-
-    let landlordId: string | null = mem?.[0]?.landlord_id || null;
+    const { data: lid } = await supabase.rpc("my_landlord_id");
+    const landlordId: string | null = lid || null;
 
     if (landlordId) {
       const { data: ll } = await supabase
@@ -122,17 +117,9 @@ export default function DashboardPage() {
       if (ll) {
         setBusinessName(ll.business_name || ll.full_name || "My Rentals");
         setLandlordName(ll.full_name || "");
-      }
-    } else {
-      const { data: landlord } = await supabase
-        .from("landlords")
-        .select("id, full_name, business_name")
-        .eq("auth_user_id", session.user.id)
-        .maybeSingle();
-      if (landlord) {
-        landlordId = landlord.id;
-        setBusinessName(landlord.business_name || landlord.full_name || "My Rentals");
-        setLandlordName(landlord.full_name || "");
+      } else {
+        setBusinessName("Chifundo and Wezzie");
+        setLandlordName("Chifundo and Wezzie Tenthani");
       }
     }
 
