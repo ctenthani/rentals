@@ -9,208 +9,99 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
-function formatMK(amount: number) {
+function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
     style: "currency",
     currency: "MWK",
     minimumFractionDigits: 0,
   })
-    .format(amount)
+    .format(n)
     .replace("MWK", "MK");
 }
 
 export default function PaymentsPage() {
-  const [payments, setPayments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<any[]>([]);
 
   useEffect(() => {
-    async function init() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.push("/auth/login");
         return;
       }
-
-      let { data: landlord } = await supabase
-        .from("landlords")
-        .select("id")
-        .eq("auth_user_id", session.user.id)
-        .maybeSingle();
-
-      if (!landlord) {
-        const { data: membership } = await supabase
-          .from("landlord_members")
-          .select("landlord_id")
-          .eq("auth_user_id", session.user.id)
-          .maybeSingle();
-        if (membership?.landlord_id) {
-          landlord = { id: membership.landlord_id };
-        }
-      }
-
-      if (!landlord) {
+      const { data: lid } = await supabase.rpc("my_landlord_id");
+      if (!lid) {
         setError("No landlord profile");
         setLoading(false);
         return;
       }
-
-      const { data: tenants } = await supabase
-        .from("tenants")
-        .select("id")
-        .eq("landlord_id", landlord.id);
-
-      const tenantIds = (tenants || []).map((t) => t.id);
-      if (tenantIds.length === 0) {
-        setPayments([]);
+      const { data: tenants } = await supabase.from("tenants").select("id").eq("landlord_id", lid);
+      const ids = (tenants || []).map((t: any) => t.id);
+      if (!ids.length) {
+        setRows([]);
         setLoading(false);
         return;
       }
-
-      const { data, error: payError } = await supabase
+      const { data, error: qErr } = await supabase
         .from("payments")
-        .select(
-          `
-          id,
-          amount,
-          method,
-          paid_date,
-          months_covered,
-          notes,
-          tenant_id,
-          tenants (
-            full_name,
-            houses ( name, code )
-          )
-        `
-        )
-        .in("tenant_id", tenantIds)
-        .order("paid_date", { ascending: false });
-
-      if (payError) setError(payError.message);
-      else setPayments(data || []);
+        .select("id, amount, method, paid_date, created_at, tenant_id, tenants(full_name, houses(name, code))")
+        .in("tenant_id", ids)
+        .order("created_at", { ascending: false });
+      if (qErr) setError(qErr.message);
+      setRows(data || []);
       setLoading(false);
-    }
-
-    init();
+    })();
   }, [router]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this payment record?")) return;
-    setDeleting(id);
-    const { error: delError } = await supabase
-      .from("payments")
-      .delete()
-      .eq("id", id);
-    setDeleting(null);
-    if (delError) {
-      setError(delError.message);
-      return;
-    }
-    setPayments((prev) => prev.filter((p) => p.id !== id));
+  const tenantOf = (row: any) => {
+    const t = row.tenants;
+    return Array.isArray(t) ? t[0] : t;
+  };
+  const houseOf = (row: any) => {
+    const t = tenantOf(row);
+    const h = t?.houses;
+    return Array.isArray(h) ? h[0] : h;
   };
 
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50">
-      <header className="bg-white/90 border-b border-emerald-100 sticky top-0 z-40">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-4">
-          <Link href="/dashboard" className="text-sm text-slate-600">
-            ← Dashboard
-          </Link>
-          <h1 className="font-bold text-slate-900">Payment history</h1>
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-white border-b">
+        <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-4">
+          <Link href="/dashboard" className="text-sm text-slate-600">← Dashboard</Link>
+          <p className="font-bold">Payment history</p>
         </div>
       </header>
-
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        {error && (
-          <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 text-sm">
-            {error}
+      <main className="max-w-3xl mx-auto p-4 space-y-3">
+        {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+        {rows.length === 0 && (
+          <div className="bg-white border rounded-2xl p-10 text-center text-slate-500">
+            <p>No payments recorded yet.</p>
+            <Link href="/record-payment" className="text-emerald-700 font-semibold text-sm">Record a payment →</Link>
           </div>
         )}
-
-        {loading ? (
-          <div className="flex justify-center p-16">
-            <div className="w-7 h-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : payments.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500 text-sm">
-            No payments recorded yet.
-            <div className="mt-3">
-              <Link
-                href="/record-payment"
-                className="text-emerald-700 font-semibold"
-              >
-                Record a payment →
-              </Link>
+        {rows.map((row) => {
+          const t = tenantOf(row);
+          const h = houseOf(row);
+          return (
+            <div key={row.id} className="bg-white border rounded-2xl p-4 flex justify-between gap-3">
+              <div>
+                <p className="font-bold">{t?.full_name || "Tenant"}</p>
+                <p className="text-xs text-slate-500">{h?.code} — {h?.name}</p>
+                <p className="text-xs text-slate-500">{row.paid_date || row.created_at?.slice(0, 10)} · {row.method || ""}</p>
+              </div>
+              <div className="text-right">
+                <p className="font-bold text-emerald-700">{formatMK(Number(row.amount))}</p>
+                <Link href={`/receipt?id=${row.id}`} className="text-xs text-sky-700 font-semibold">Receipt</Link>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {payments.map((p) => {
-              const tenant = Array.isArray(p.tenants)
-                ? p.tenants[0]
-                : p.tenants;
-              const house = tenant?.houses
-                ? Array.isArray(tenant.houses)
-                  ? tenant.houses[0]
-                  : tenant.houses
-                : null;
-
-              return (
-                <div
-                  key={p.id}
-                  className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <p className="font-semibold text-slate-900">
-                      {tenant?.full_name || "Tenant"}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {house?.name || "—"}
-                      {house?.code ? ` (${house.code})` : ""} · {p.paid_date}
-                      {p.method ? ` · ${p.method}` : ""}
-                    </p>
-                    {p.months_covered ? (
-                      <p className="text-xs text-teal-700 mt-0.5">
-                        {p.months_covered} month(s) covered
-                      </p>
-                    ) : null}
-                    {p.notes ? (
-                      <p className="text-xs text-slate-400 mt-0.5 truncate">
-                        {p.notes}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0">
-                    <p className="font-bold text-emerald-700 text-lg">
-                      {formatMK(Number(p.amount))}
-                    </p>
-                    <Link
-                      href={`/receipt?id=${p.id}`}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl"
-                    >
-                      Receipt
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(p.id)}
-                      disabled={deleting === p.id}
-                      className="text-xs text-rose-600 font-medium px-2"
-                    >
-                      {deleting === p.id ? "..." : "Delete"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+          );
+        })}
       </main>
     </div>
   );
