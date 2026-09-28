@@ -10,13 +10,15 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 function formatMK(n: number) {
-  return new Intl.NumberFormat("en-MW", {
-    style: "currency",
-    currency: "MWK",
-    minimumFractionDigits: 0,
-  })
+  return new Intl.NumberFormat("en-MW", { style: "currency", currency: "MWK", minimumFractionDigits: 0 })
     .format(n)
     .replace("MWK", "MK");
+}
+
+function addMonths(iso: string, n: number) {
+  const d = new Date(iso + "T12:00:00");
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 export default function PendingPage() {
@@ -26,11 +28,10 @@ export default function PendingPage() {
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [working, setWorking] = useState<string | null>(null);
+  const [biz, setBiz] = useState("Rentozi");
 
   async function load() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       router.push("/auth/login");
       return;
@@ -41,7 +42,13 @@ export default function PendingPage() {
       setLoading(false);
       return;
     }
-    const { data: tenants } = await supabase.from("tenants").select("id").eq("landlord_id", lid);
+    const { data: pub } = await supabase.rpc("landlord_public", { p_id: lid });
+    if (pub) setBiz(pub.business_name || pub.full_name || "Rentozi");
+
+    const { data: tenants } = await supabase
+      .from("tenants")
+      .select("id, houses(monthly_rent)")
+      .eq("landlord_id", lid);
     const ids = (tenants || []).map((t: any) => t.id);
     if (!ids.length) {
       setItems([]);
@@ -50,9 +57,7 @@ export default function PendingPage() {
     }
     const { data, error: qErr } = await supabase
       .from("payment_submissions")
-      .select(
-        "id, amount, method, reference_used, paid_date, status, created_at, proof_path, tenant_id, tenants(full_name, email, phone, houses(name, code))"
-      )
+      .select("id, amount, method, reference_used, paid_date, status, created_at, proof_path, tenant_id, tenants(full_name, email, phone, houses(name, code, monthly_rent))")
       .in("tenant_id", ids)
       .eq("status", "pending")
       .order("created_at", { ascending: false });
@@ -65,15 +70,10 @@ export default function PendingPage() {
     load();
   }, [router]);
 
-  const tenantOf = (row: any) => {
-    const t = row.tenants;
-    return Array.isArray(t) ? t[0] : t;
-  };
-
+  const tenantOf = (row: any) => (Array.isArray(row.tenants) ? row.tenants[0] : row.tenants);
   const houseOf = (row: any) => {
     const t = tenantOf(row);
-    const h = t?.houses;
-    return Array.isArray(h) ? h[0] : h;
+    return Array.isArray(t?.houses) ? t.houses[0] : t?.houses;
   };
 
   const decide = async (id: string, status: "confirmed" | "rejected") => {
@@ -81,12 +81,16 @@ export default function PendingPage() {
     const row = items.find((x) => x.id === id);
     const t = row ? tenantOf(row) : null;
     const h = row ? houseOf(row) : null;
+    const rent = Number(h?.monthly_rent || 0);
+    const months = rent > 0 ? Math.max(1, Math.round(Number(row.amount) / rent)) : 1;
+
     const { error: uErr } = await supabase.from("payment_submissions").update({ status }).eq("id", id);
     if (uErr) {
       setError(uErr.message);
       setWorking(null);
       return;
     }
+
     let paymentId: string | null = null;
     if (status === "confirmed" && row) {
       const { data: pay } = await supabase
@@ -101,28 +105,42 @@ export default function PendingPage() {
         .select("id")
         .maybeSingle();
       paymentId = pay?.id || null;
+
+      const { data: bal } = await supabase.from("tenant_balances").select("*").eq("tenant_id", row.tenant_id).maybeSingle();
+      const startFrom = bal?.next_due_date && new Date(bal.next_due_date) > new Date()
+        ? bal.next_due_date
+        : row.paid_date || new Date().toISOString().slice(0, 10);
+      const nextDue = addMonths(startFrom, months);
+      await supabase.from("tenant_balances").upsert({
+        tenant_id: row.tenant_id,
+        next_due_date: nextDue,
+        months_in_advance: months,
+        current_balance: 0,
+        status: "paid",
+      });
     }
+
     if (t?.email) {
       const receiptLink = paymentId
         ? `https://rentozi.netlify.app/receipt?id=${paymentId}`
         : "https://rentozi.netlify.app/tenant";
-      const months = Number(row?.months_covered || 0);
       await supabase.functions.invoke("send-email", {
         body: {
           to: t.email,
-          subject: status === "confirmed" ? "Your rent payment has been confirmed" : "Payment not accepted",
+          subject: status === "confirmed" ? `${biz}: rent payment confirmed` : `${biz}: payment not accepted`,
           html:
             status === "confirmed"
-              ? `<p>Your rent payment has been received and confirmed.</p>
+              ? `<p style="color:#64748b;font-size:12px">${biz}</p>
+                 <p>Your rent payment has been received and confirmed.</p>
                  <p>Amount: <strong>${formatMK(Number(row.amount))}</strong><br/>
                  Property: ${h?.name || h?.code || "—"}<br/>
                  Date: ${row.paid_date || new Date().toISOString().slice(0, 10)}<br/>
                  Method: ${row.method || "Tenant submission"}<br/>
-                 Months covered: ${months || "—"}</p>
-                 <p>View / print your receipt:<br/>
-                 <a href="${receiptLink}">${receiptLink}</a></p>
-                 <p>Thank you.</p>`
-              : `<p>Your payment of ${formatMK(Number(row.amount))} was not accepted. Contact your landlord.</p>`,
+                 Months covered: ${months}</p>
+                 <p>View / print your receipt:<br/><a href="${receiptLink}">${receiptLink}</a></p>
+                 <p>Thank you.<br/>${biz}</p>`
+              : `<p style="color:#64748b;font-size:12px">${biz}</p>
+                 <p>Your payment of ${formatMK(Number(row.amount))} was not accepted. Contact ${biz}.</p>`,
         },
       });
     }
@@ -130,17 +148,13 @@ export default function PendingPage() {
     await load();
   };
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
-  }
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-4">
-          <Link href="/dashboard" className="text-sm text-slate-600">
-            ← Dashboard
-          </Link>
+          <Link href="/dashboard" className="text-sm text-slate-600">← Dashboard</Link>
           <p className="font-bold">Pending payments</p>
         </div>
       </header>
@@ -150,35 +164,22 @@ export default function PendingPage() {
         {items.map((row) => {
           const t = tenantOf(row);
           const h = houseOf(row);
+          const rent = Number(h?.monthly_rent || 0);
+          const months = rent > 0 ? Math.max(1, Math.round(Number(row.amount) / rent)) : 1;
           return (
             <div key={row.id} className="bg-white border rounded-2xl p-4 space-y-2">
               <div className="flex justify-between gap-3">
                 <div>
                   <p className="font-bold">{t?.full_name || "Tenant"}</p>
-                  <p className="text-xs text-slate-500">
-                    {h?.code} — {h?.name}
-                  </p>
+                  <p className="text-xs text-slate-500">{h?.code} — {h?.name}</p>
                 </div>
                 <p className="font-bold text-emerald-700">{formatMK(Number(row.amount))}</p>
               </div>
-              <p className="text-sm text-slate-600">
-                {row.method} · {row.paid_date} · {row.reference_used || "no ref"}
-              </p>
+              <p className="text-sm text-slate-600">{row.method} · {row.paid_date} · {row.reference_used || "no ref"}</p>
+              <p className="text-xs text-emerald-800 bg-emerald-50 inline-block px-2 py-1 rounded-md">Will cover {months} month{months === 1 ? "" : "s"}</p>
               <div className="flex gap-2 pt-1">
-                <button
-                  disabled={working === row.id}
-                  onClick={() => decide(row.id, "confirmed")}
-                  className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm"
-                >
-                  Confirm
-                </button>
-                <button
-                  disabled={working === row.id}
-                  onClick={() => decide(row.id, "rejected")}
-                  className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm"
-                >
-                  Reject
-                </button>
+                <button disabled={working === row.id} onClick={() => decide(row.id, "confirmed")} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm">Confirm</button>
+                <button disabled={working === row.id} onClick={() => decide(row.id, "rejected")} className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm">Reject</button>
               </div>
             </div>
           );
