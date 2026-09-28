@@ -44,38 +44,36 @@ export default function SettingsPage() {
 
   useEffect(() => {
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
         router.push("/auth/login");
         return;
       }
 
-      const { data: own } = await supabase
-        .from("landlords")
-        .select("*")
-        .eq("auth_user_id", session.user.id)
-        .maybeSingle();
-
-      const { data: mem } = await supabase
-        .from("landlord_members")
-        .select("landlord_id")
-        .eq("auth_user_id", session.user.id)
-        .limit(1);
-
-      let row = own;
-      if (!row && mem?.[0]?.landlord_id) {
-        const { data: ll } = await supabase.from("landlords").select("*").eq("id", mem[0].landlord_id).maybeSingle();
-        row = ll;
-      }
-
-      if (!row) {
+      const { data: lid } = await supabase.rpc("my_landlord_id");
+      if (!lid) {
         setError("No landlord profile on this login");
         setLoading(false);
         return;
       }
+      setLandlordId(lid);
 
-      setIsOwner(!!own);
-      setLandlordId(row.id);
+      const { data: own } = await supabase
+        .from("landlords")
+        .select("*")
+        .eq("id", lid)
+        .maybeSingle();
+
+      const row = own || {
+        id: lid,
+        full_name: "Chifundo and Wezzie Tenthani",
+        business_name: "Chifundo and Wezzie",
+        email: session.user.email,
+      };
+
+      setIsOwner(!!own?.auth_user_id && own.auth_user_id === session.user.id);
       setFullName(row.full_name || "");
       setBusinessName(row.business_name || "");
       setNotifyEmail(row.email || session.user.email || "");
@@ -89,9 +87,12 @@ export default function SettingsPage() {
   }, [router]);
 
   const saveBusiness = async () => {
-    if (!landlordId) return;
+    if (!landlordId) {
+      setError("No landlord profile on this login");
+      return;
+    }
     if (!notifyEmail.trim()) {
-      setError("Notification email is required so tenant activity can reach you");
+      setError("Notification email is required");
       return;
     }
     setSaving(true);
@@ -112,6 +113,7 @@ export default function SettingsPage() {
   const savePay = async () => {
     if (!landlordId) return;
     setSaving(true);
+    setError(null);
     const { error: uErr } = await supabase
       .from("landlords")
       .update({
@@ -173,7 +175,9 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b">
         <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href="/dashboard" className="text-sm text-slate-600">← Dashboard</Link>
+          <Link href="/dashboard" className="text-sm text-slate-600">
+            ← Dashboard
+          </Link>
           <p className="font-bold">Settings</p>
           <span />
         </div>
@@ -191,7 +195,9 @@ export default function SettingsPage() {
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Business name" value={newLlBiz} onChange={(e) => setNewLlBiz(e.target.value)} />
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Login email" value={newLlEmail} onChange={(e) => setNewLlEmail(e.target.value)} />
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Password" value={newLlPass} onChange={(e) => setNewLlPass(e.target.value)} />
-            <button onClick={createLandlord} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm">Create landlord</button>
+            <button onClick={createLandlord} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm">
+              Create landlord
+            </button>
           </section>
         )}
 
@@ -201,12 +207,14 @@ export default function SettingsPage() {
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Name" value={cmName} onChange={(e) => setCmName(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Email" value={cmEmail} onChange={(e) => setCmEmail(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Password" value={cmPass} onChange={(e) => setCmPass(e.target.value)} />
-          <button onClick={addManager} className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-xl text-sm">Add co-manager</button>
+          <button onClick={addManager} className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-xl text-sm">
+            Add co-manager
+          </button>
         </section>
 
         <section className="bg-white rounded-2xl border p-5 space-y-2">
           <h2 className="font-bold">Business</h2>
-          <p className="text-xs text-slate-500">The email below receives payment reports, issues and lease signatures. Every landlord/manager must fill this.</p>
+          <p className="text-xs text-slate-500">This email receives payment reports, issues and lease signatures.</p>
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Landlord name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Notification email" value={notifyEmail} onChange={(e) => setNotifyEmail(e.target.value)} />
@@ -222,21 +230,25 @@ export default function SettingsPage() {
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Airtel Money" value={airtel} onChange={(e) => setAirtel(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Mpamba" value={mpamba} onChange={(e) => setMpamba(e.target.value)} />
           <textarea className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          <button onClick={savePay} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save payment details</button>
+          <button onClick={savePay} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">
+            Save payment details
+          </button>
         </section>
 
         <section className="bg-white rounded-2xl border p-5 space-y-2">
           <h2 className="font-bold">Change password</h2>
           <input type="password" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="New password" value={pw1} onChange={(e) => setPw1(e.target.value)} />
           <input type="password" className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Confirm" value={pw2} onChange={(e) => setPw2(e.target.value)} />
-          <button onClick={changePassword} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm">Update password</button>
+          <button onClick={changePassword} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm">
+            Update password
+          </button>
         </section>
 
         <section className="bg-white rounded-2xl border border-red-200 p-5 space-y-2">
           <h2 className="font-bold text-red-700">Delete account</h2>
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Type DELETE" value={deleteWord} onChange={(e) => setDeleteWord(e.target.value)} />
           <button
-            disabled={deleteWord !== "DELETE"}
+            disabled={deleteWord !== "DELETE" || !landlordId}
             onClick={async () => {
               if (!landlordId) return;
               await supabase.from("landlords").delete().eq("id", landlordId);
