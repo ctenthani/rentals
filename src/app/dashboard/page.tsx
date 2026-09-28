@@ -19,18 +19,19 @@ function formatMK(n: number) {
     .replace("MWK", "MK");
 }
 
-function getPaidMonths(nextDueDate: string | null, monthsInAdvance: number) {
-  if (!nextDueDate) return "—";
-  const d = new Date(nextDueDate + "T12:00:00");
-  if (Number.isNaN(d.getTime())) return "—";
+function cycleMonths(nextDue: string | null, monthsInAdvance: number) {
+  if (!nextDue) return [] as string[];
+  const count = Math.max(Number(monthsInAdvance) || 0, 0);
+  if (!count) return [];
+  const d = new Date(nextDue + "T12:00:00");
+  if (Number.isNaN(d.getTime())) return [];
   d.setMonth(d.getMonth() - 1);
-  const count = Math.max(Number(monthsInAdvance) || 1, 1);
-  const months: string[] = [];
+  const out: string[] = [];
   for (let i = 0; i < count; i++) {
-    months.unshift(d.toLocaleString("en", { month: "short", year: "numeric" }));
+    out.unshift(d.toLocaleString("en", { month: "short", year: "numeric" }));
     d.setMonth(d.getMonth() - 1);
   }
-  return months.join(", ");
+  return out;
 }
 
 function computeStatus(nextDue: string | null, balance: number) {
@@ -412,8 +413,17 @@ export default function DashboardPage() {
                   <td className="px-2 py-2">{formatMK(r.monthly_rent)}</td>
                   <td className="px-2 py-2">{r.next_due_date || "—"}</td>
                   <td className="px-2 py-2">
-                    {getPaidMonths(r.next_due_date, r.months_in_advance)}
-                    <div className="text-slate-400">{r.months_in_advance} mo adv</div>
+                                     <td className="px-2 py-2">
+                    <div className="flex flex-wrap gap-1 max-w-[220px]">
+                      {cycleMonths(r.next_due_date, r.months_in_advance).map((m) => (
+                        <span key={m} className="bg-emerald-50 text-emerald-800 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                          {m}
+                        </span>
+                      ))}
+                      {!cycleMonths(r.next_due_date, r.months_in_advance).length && (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-2 py-2 text-rose-600 font-semibold">{formatMK(r.current_balance)}</td>
                   <td className="px-2 py-2"><StatusBadge status={r.status} /></td>
