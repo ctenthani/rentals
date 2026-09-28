@@ -115,6 +115,8 @@ export default function LeasePage() {
 
       setTenantMode(isOwn && !isThisLandlord);
       setTenant(t);
+            const { data: pub } = await supabase.rpc("landlord_public", { p_id: t.landlord_id });
+      setLandlord(pub);
       const h = Array.isArray(t.houses) ? t.houses[0] : t.houses;
       setHouse(h);
 
@@ -130,11 +132,11 @@ export default function LeasePage() {
       const nextYear = new Date();
       nextYear.setFullYear(nextYear.getFullYear() + 1);
 
-      setForm({
+            setForm({
         id_number: lease?.id_number || "",
-        move_in: lease?.move_in || today,
-        lease_start: lease?.lease_start || today,
-        lease_end: lease?.lease_end || nextYear.toISOString().slice(0, 10),
+        move_in: lease?.move_in || "",
+        lease_start: lease?.lease_start || lease?.start_date || "",
+        lease_end: lease?.lease_end || lease?.end_date || "",
         monthly_rent: String(lease?.monthly_rent ?? h?.monthly_rent ?? 0),
         deposit: String(lease?.deposit ?? 0),
         payment_day: String(lease?.payment_day ?? 1),
@@ -213,6 +215,8 @@ export default function LeasePage() {
       lease_end: form.lease_end || null,
       start_date: form.lease_start || form.move_in || null,
       end_date: form.lease_end || null,
+      lease_start: form.lease_start || null,
+      lease_end: form.lease_end || null,
       monthly_rent: Number(form.monthly_rent || 0),
       deposit: Number(form.deposit || 0),
       payment_day: Number(form.payment_day || 1),
