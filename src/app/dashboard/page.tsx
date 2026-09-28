@@ -97,7 +97,6 @@ export default function DashboardPage() {
       router.push("/auth/login");
       return;
     }
-
     setUserEmail(session.user.email || "");
 
     const { data: tenantRows } = await supabase
@@ -141,7 +140,6 @@ export default function DashboardPage() {
       router.push("/tenant");
       return;
     }
-
     if (!landlordId) {
       setError("No landlord profile linked to this account");
       setLoading(false);
@@ -162,10 +160,7 @@ export default function DashboardPage() {
     const tenantIds = (tenants || []).map((t: any) => t.id);
     let balances: any[] = [];
     if (tenantIds.length) {
-      const { data: bal } = await supabase
-        .from("tenant_balances")
-        .select("*")
-        .in("tenant_id", tenantIds);
+      const { data: bal } = await supabase.from("tenant_balances").select("*").in("tenant_id", tenantIds);
       balances = bal || [];
       const { count } = await supabase
         .from("payment_submissions")
@@ -205,6 +200,13 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, [router]);
+
+  const totals = {
+    expected: rows.reduce((s, r) => s + r.monthly_rent, 0),
+    outstanding: rows.reduce((s, r) => s + r.current_balance, 0),
+    paid: rows.filter((r) => r.status === "paid").length,
+    overdue: rows.filter((r) => r.status === "overdue").length,
+  };
 
   const handleSaveEdit = async () => {
     if (!editing) return;
@@ -330,25 +332,14 @@ export default function DashboardPage() {
               </p>
             </div>
             <nav className="flex flex-wrap items-center gap-1 text-xs">
-              <Link href="/dashboard" className="px-2.5 py-1.5 rounded-lg bg-emerald-100 text-emerald-900 font-semibold">
-                Dashboard
-              </Link>
+              <Link href="/dashboard" className="px-2.5 py-1.5 rounded-lg bg-emerald-100 text-emerald-900 font-semibold">Dashboard</Link>
               {isAlsoTenant && (
-                <Link href="/tenant" className="px-2.5 py-1.5 rounded-lg bg-sky-100 text-sky-900 font-semibold">
-                  Tenant view
-                </Link>
+                <Link href="/tenant" className="px-2.5 py-1.5 rounded-lg bg-sky-100 text-sky-900 font-semibold">Tenant view</Link>
               )}
-              <Link
-                href="/pending"
-                className={`px-2.5 py-1.5 rounded-lg font-semibold relative ${
-                  pendingCount > 0 ? "bg-amber-100 text-amber-900 animate-pulse" : "text-slate-600"
-                }`}
-              >
+              <Link href="/pending" className={`px-2.5 py-1.5 rounded-lg font-semibold relative ${pendingCount > 0 ? "bg-amber-100 text-amber-900 animate-pulse" : "text-slate-600"}`}>
                 Pending
                 {pendingCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">
-                    {pendingCount}
-                  </span>
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">{pendingCount}</span>
                 )}
               </Link>
               <Link href="/record-payment" className="px-2.5 py-1.5 rounded-lg text-slate-600">Record</Link>
@@ -363,7 +354,6 @@ export default function DashboardPage() {
 
       <main className="w-full max-w-[100vw] px-3 lg:px-6 py-4 space-y-4">
         {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
-
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Expected</p>
@@ -385,16 +375,14 @@ export default function DashboardPage() {
 
         <div className="flex justify-between items-center">
           <h2 className="font-bold">Houses &amp; Tenants</h2>
-          <button onClick={() => setShowAdd(true)} className="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl">
-            + Add Property
-          </button>
+          <button onClick={() => setShowAdd(true)} className="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl">+ Add Property</button>
         </div>
 
         <div className="bg-white rounded-2xl border overflow-x-auto">
           <table className="w-full text-left text-xs min-w-[900px]">
             <thead className="bg-emerald-50 text-emerald-900">
               <tr>
-                {["House","Tenant","Rent","Next due","Paid months","Balance","Status","Bank","Login","Actions"].map((h) => (
+                {["House", "Tenant", "Rent", "Next due", "This cycle", "Balance", "Status", "Bank", "Login", "Actions"].map((h) => (
                   <th key={h} className="px-2 py-2">{h}</th>
                 ))}
               </tr>
@@ -413,16 +401,11 @@ export default function DashboardPage() {
                   <td className="px-2 py-2">{formatMK(r.monthly_rent)}</td>
                   <td className="px-2 py-2">{r.next_due_date || "—"}</td>
                   <td className="px-2 py-2">
-                                     <td className="px-2 py-2">
                     <div className="flex flex-wrap gap-1 max-w-[220px]">
                       {cycleMonths(r.next_due_date, r.months_in_advance).map((m) => (
-                        <span key={m} className="bg-emerald-50 text-emerald-800 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                          {m}
-                        </span>
+                        <span key={m} className="bg-emerald-50 text-emerald-800 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">{m}</span>
                       ))}
-                      {!cycleMonths(r.next_due_date, r.months_in_advance).length && (
-                        <span className="text-slate-400">—</span>
-                      )}
+                      {!cycleMonths(r.next_due_date, r.months_in_advance).length && <span className="text-slate-400">—</span>}
                     </div>
                   </td>
                   <td className="px-2 py-2 text-rose-600 font-semibold">{formatMK(r.current_balance)}</td>
@@ -455,38 +438,23 @@ export default function DashboardPage() {
             ].map(([label, key]) => (
               <div key={key}>
                 <label className="text-xs font-semibold text-slate-500">{label}</label>
-                <input
-                  className="w-full border rounded-xl px-3 py-2 text-sm mt-1"
-                  value={editing[key] || ""}
-                  onChange={(e) => setEditing({ ...editing, [key]: e.target.value })}
-                />
+                <input className="w-full border rounded-xl px-3 py-2 text-sm mt-1" value={editing[key] || ""} onChange={(e) => setEditing({ ...editing, [key]: e.target.value })} />
               </div>
             ))}
             <label className="text-xs font-semibold text-slate-500">Next due date</label>
             <input type="date" className="w-full border rounded-xl px-3 py-2 text-sm" value={editing.next_due_date || ""} onChange={(e) => setEditing({ ...editing, next_due_date: e.target.value })} />
-            <label className="text-xs font-semibold text-slate-500">Months in advance</label>
+            <label className="text-xs font-semibold text-slate-500">Months in this cycle</label>
             <input type="number" className="w-full border rounded-xl px-3 py-2 text-sm" value={editing.months_in_advance} onChange={(e) => setEditing({ ...editing, months_in_advance: e.target.value })} />
             <label className="text-xs font-semibold text-slate-500">Balance</label>
             <input type="number" className="w-full border rounded-xl px-3 py-2 text-sm" value={editing.current_balance} onChange={(e) => setEditing({ ...editing, current_balance: e.target.value })} />
             <label className="text-xs font-semibold text-slate-500">Default login password</label>
             <input className="w-full border rounded-xl px-3 py-2 text-sm" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
-
             <div className="flex flex-wrap items-center gap-2 pt-2">
-              <button onClick={handleSaveEdit} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-semibold">
-                {saving ? "Saving..." : "Save"}
-              </button>
-              <button type="button" onClick={handleCreateLogin} disabled={saving} className="border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm font-semibold">
-                Create login
-              </button>
-              <Link href="/help" className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl text-sm font-semibold">
-                How to use Rentozi
-              </Link>
-              <button type="button" onClick={() => handleDelete(editing.id)} className="border border-red-200 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-semibold">
-                Delete
-              </button>
-              <button type="button" onClick={() => setEditing(null)} className="text-slate-500 hover:bg-slate-100 px-4 py-2 rounded-xl text-sm font-semibold">
-                Cancel
-              </button>
+              <button onClick={handleSaveEdit} disabled={saving} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">{saving ? "Saving..." : "Save"}</button>
+              <button type="button" onClick={handleCreateLogin} disabled={saving} className="border px-4 py-2 rounded-xl text-sm font-semibold">Create login</button>
+              <Link href="/help" className="bg-sky-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">How to use Rentozi</Link>
+              <button type="button" onClick={() => handleDelete(editing.id)} className="border border-red-200 text-red-600 px-4 py-2 rounded-xl text-sm font-semibold">Delete</button>
+              <button type="button" onClick={() => setEditing(null)} className="text-slate-500 px-4 py-2 rounded-xl text-sm font-semibold">Cancel</button>
             </div>
           </div>
         </div>
