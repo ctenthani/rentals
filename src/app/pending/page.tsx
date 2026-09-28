@@ -71,31 +71,45 @@ export default function PendingPage() {
     return Array.isArray(h) ? h[0] : h;
   };
 
-  const decide = async (id: string, status: "confirmed" | "rejected") => {
+    const decide = async (id: string, status: "confirmed" | "rejected") => {
     setWorking(id);
     const row = items.find((x) => x.id === id);
     const t = row ? tenantOf(row) : null;
+    const h = row ? houseOf(row) : null;
     const { error: uErr } = await supabase.from("payment_submissions").update({ status }).eq("id", id);
     if (uErr) {
       setError(uErr.message);
       setWorking(null);
       return;
     }
+    let paymentId: string | null = null;
     if (status === "confirmed" && row) {
-      await supabase.from("payments").insert({
-        tenant_id: row.tenant_id,
-        amount: row.amount,
-        method: row.method,
-        paid_date: row.paid_date,
-        reference: row.reference_used,
-      });
+      const { data: pay } = await supabase
+        .from("payments")
+        .insert({
+          tenant_id: row.tenant_id,
+          amount: row.amount,
+          method: row.method,
+          paid_date: row.paid_date,
+          reference: row.reference_used,
+        })
+        .select("id")
+        .maybeSingle();
+      paymentId = pay?.id || null;
     }
     if (t?.email) {
+      const receiptLink = paymentId
+        ? `https://rentozi.netlify.app/receipt?id=${paymentId}`
+        : "https://rentozi.netlify.app/tenant";
       await supabase.functions.invoke("send-email", {
         body: {
           to: t.email,
-          subject: status === "confirmed" ? "Payment confirmed" : "Payment not accepted",
-          html: `<p>Your payment of ${formatMK(Number(row.amount))} was ${status}.</p>`,
+          subject: status === "confirmed" ? "Payment confirmed — receipt attached" : "Payment not accepted",
+          html:
+            status === "confirmed"
+              ? `<p>Your payment of <strong>${formatMK(Number(row.amount))}</strong> for ${h?.code || ""} was confirmed.</p>
+                 <p><a href="${receiptLink}">Open / print your receipt</a></p>`
+              : `<p>Your payment of ${formatMK(Number(row.amount))} was not accepted. Contact your landlord.</p>`,
         },
       });
     }
