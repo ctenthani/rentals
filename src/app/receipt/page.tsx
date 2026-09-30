@@ -8,6 +8,8 @@ const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
     style: "currency",
@@ -18,19 +20,25 @@ function formatMK(n: number) {
     .replace("MWK", "MK");
 }
 
+function addMonths(iso: string, n: number) {
+  const d = new Date(iso + "T12:00:00");
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function ReceiptPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [brand, setBrand] = useState("Rentozi Rentals");
+  const [pay, setPay] = useState<any>(null);
+  const [tenant, setTenant] = useState<any>(null);
+  const [house, setHouse] = useState<any>(null);
+  const [biz, setBiz] = useState("Rentozi");
   const [landlordName, setLandlordName] = useState("");
-  const [payment, setPayment] = useState<any>(null);
-  const [tenantName, setTenantName] = useState("");
-  const [houseLabel, setHouseLabel] = useState("");
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const [nextDue, setNextDue] = useState<string | null>(null);
+  const [months, setMonths] = useState(1);
 
   useEffect(() => {
-    async function load() {
+    (async () => {
       const id = new URLSearchParams(window.location.search).get("id");
       if (!id) {
         setError("Missing receipt id");
@@ -38,119 +46,126 @@ export default function ReceiptPage() {
         return;
       }
 
-      const { data, error: qErr } = await supabase
+      const { data: p, error: pErr } = await supabase
         .from("payments")
-        .select(
-          `id, amount, method, paid_date, months_covered, notes, created_at, tenant_id,
-           tenants ( full_name, landlord_id, houses ( name, code ) )`
-        )
+        .select("id, amount, method, paid_date, created_at, tenant_id, reference")
         .eq("id", id)
         .maybeSingle();
-
-      if (qErr || !data) {
-        setError(qErr?.message || "Receipt not found");
+      if (pErr || !p) {
+        setError(pErr?.message || "Receipt not found");
         setLoading(false);
         return;
       }
+      setPay(p);
 
-      setPayment(data);
-      const t: any = Array.isArray(data.tenants) ? data.tenants[0] : data.tenants;
-      setTenantName(t?.full_name || "Tenant");
-      const h = t?.houses
-        ? Array.isArray(t.houses)
-          ? t.houses[0]
-          : t.houses
-        : null;
-      setHouseLabel(h ? `${h.name} (${h.code})` : "—");
+      const { data: t } = await supabase
+        .from("tenants")
+        .select("id, full_name, email, phone, landlord_id, house_id")
+        .eq("id", p.tenant_id)
+        .maybeSingle();
+      setTenant(t);
 
-      if (t?.landlord_id) {
-        const { data: ll } = await supabase
-          .from("landlords")
-          .select("business_name, full_name")
-          .eq("id", t.landlord_id)
+      if (t?.house_id) {
+        const { data: h } = await supabase
+          .from("houses")
+          .select("id, name, code, monthly_rent")
+          .eq("id", t.house_id)
           .maybeSingle();
-        if (ll?.business_name) setBrand(ll.business_name);
-        else if (ll?.full_name) setBrand(ll.full_name);
-        if (ll?.full_name) setLandlordName(ll.full_name);
+        setHouse(h);
+        const rent = Number(h?.monthly_rent || 0);
+        const covered = rent > 0 ? Math.max(1, Math.round(Number(p.amount) / rent)) : 1;
+        setMonths(covered);
       }
 
+      const { data: bal } = await supabase
+        .from("tenant_balances")
+        .select("next_due_date, months_in_advance")
+        .eq("tenant_id", p.tenant_id)
+        .maybeSingle();
+      if (bal?.next_due_date) setNextDue(bal.next_due_date);
+      else {
+        const start = p.paid_date || p.created_at?.slice(0, 10);
+        const rent = Number((await supabase.from("houses").select("monthly_rent").eq("id", t?.house_id).maybeSingle()).data?.monthly_rent || 0);
+        const covered = rent > 0 ? Math.max(1, Math.round(Number(p.amount) / rent)) : 1;
+        if (start) setNextDue(addMonths(start, covered));
+      }
+
+      if (t?.landlord_id) {
+        const { data: pub } = await supabase.rpc("landlord_public", { p_id: t.landlord_id });
+        if (pub) {
+          setBiz(pub.business_name || pub.full_name || "Rentozi");
+          setLandlordName(pub.full_name || "");
+        }
+      }
       setLoading(false);
-    }
-    load();
+    })();
   }, []);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-500">Loading receipt...</p>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading receipt...</div>;
+  }
+  if (error || !pay) {
+    return <div className="min-h-screen flex items-center justify-center text-red-600">{error || "Not found"}</div>;
   }
 
-  if (error || !payment) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3">
-        <p className="text-red-600 text-sm">{error}</p>
-        <Link href="/dashboard" className="text-emerald-700 text-sm">
-          ← Dashboard
-        </Link>
-      </div>
-    );
-  }
+  const date = pay.paid_date || pay.created_at?.slice(0, 10);
+  const receiptNo = String(pay.id).slice(0, 8).toUpperCase();
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4">
-      <div className="max-w-md mx-auto">
-        <div className="flex justify-between mb-4 print:hidden">
-          <Link href="/dashboard" className="text-sm text-slate-600">
-            ← Back
-          </Link>
-          <button
-            onClick={() => window.print()}
-            className="bg-emerald-600 text-white text-sm px-4 py-2 rounded-xl"
-          >
-            Print
-          </button>
+    <div className="min-h-screen bg-slate-100 py-8 px-4">
+      <div className="max-w-xl mx-auto mb-4 flex justify-between print:hidden">
+        <Link href="/tenant" className="text-sm text-slate-600">
+          ← Back
+        </Link>
+        <button onClick={() => window.print()} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">
+          Print
+        </button>
+      </div>
+
+      <article className="max-w-xl mx-auto bg-white border-2 border-slate-800 p-8 text-slate-900">
+        <p className="text-center text-[11px] tracking-[0.2em] uppercase text-slate-500">Official receipt</p>
+        <h1 className="text-center text-2xl font-bold mt-1">{biz}</h1>
+        {landlordName && <p className="text-center text-sm text-slate-500">{landlordName}</p>}
+        <hr className="my-5 border-slate-800" />
+
+        <p className="text-sm mb-4">
+          Dear {tenant?.full_name || "Tenant"},
+        </p>
+        <p className="text-sm mb-4">Your rent payment has been received and confirmed.</p>
+
+        <div className="text-sm space-y-1">
+          <p>
+            <strong>Receipt No:</strong> {receiptNo}
+          </p>
+          <p>
+            <strong>Date:</strong> {date}
+          </p>
+          <p>
+            <strong>Received from:</strong> {tenant?.full_name}
+          </p>
+          <p>
+            <strong>Property:</strong> {house?.name} {house?.code ? `(${house.code})` : ""}
+          </p>
+          <p>
+            <strong>Method:</strong> {pay.method || "—"}
+          </p>
+          {pay.reference && (
+            <p>
+              <strong>Reference:</strong> {pay.reference}
+            </p>
+          )}
+          <p>
+            <strong>Months covered:</strong> {months}
+          </p>
+          <p>
+            <strong>Next due date:</strong> {nextDue || "—"}
+          </p>
         </div>
 
-        <article className="bg-white border-2 border-slate-800 p-6">
-          <p className="text-center text-xs uppercase tracking-widest text-slate-500">
-            Official receipt
-          </p>
-          <h1 className="text-center text-xl font-bold mt-1">{brand}</h1>
-          {landlordName && (
-            <p className="text-center text-sm text-slate-600">{landlordName}</p>
-          )}
-          <hr className="my-4" />
-          <p className="text-sm">
-            <strong>Receipt No:</strong> {String(payment.id).slice(0, 8).toUpperCase()}
-          </p>
-          <p className="text-sm">
-            <strong>Date:</strong> {payment.paid_date}
-          </p>
-          <p className="text-sm">
-            <strong>Received from:</strong> {tenantName}
-          </p>
-          <p className="text-sm">
-            <strong>Property:</strong> {houseLabel}
-          </p>
-          <p className="text-sm">
-            <strong>Method:</strong> {payment.method}
-          </p>
-          {payment.months_covered ? (
-            <p className="text-sm">
-              <strong>Months covered:</strong> {payment.months_covered}
-            </p>
-          ) : null}
-          <p className="text-2xl font-bold text-center my-6">
-            {formatMK(Number(payment.amount))}
-          </p>
-          <p className="text-xs text-slate-500 text-center">
-            Thank you for your payment.
-          </p>
-          <p className="text-xs text-center mt-4 font-semibold">{brand}</p>
-        </article>
-      </div>
+        <p className="text-center text-3xl font-bold my-8">{formatMK(Number(pay.amount))}</p>
+        <p className="text-center text-sm text-slate-500">Thank you for your payment.</p>
+        <p className="text-center font-semibold mt-1">{biz}</p>
+      </article>
     </div>
   );
 }
