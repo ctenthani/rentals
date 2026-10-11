@@ -1,15 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -53,9 +48,11 @@ export default function RecordPaymentPage() {
   const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState("");
 
+  const request = useRef<{ details: string; id: string } | null>(null);
+  const inFlight = useRef(false);
   const selected = tenants.find((t) => t.id === tenantId);
   const rent = Number(selected?.house?.monthly_rent || 0);
-  const months = rent > 0 && Number(amount) > 0 ? Math.max(1, Math.round(Number(amount) / rent)) : 0;
+  const months = rent > 0 && Number(amount) > 0 ? Math.floor(Number(amount) / rent) : 0;
 
   useEffect(() => {
     (async () => {
@@ -118,42 +115,25 @@ export default function RecordPaymentPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
-    setSaving(true);
-    setError(null);
-    setMsg(null);
-
-    const { data: pay, error: pErr } = await supabase
-      .from("payments")
-      .insert({
-        tenant_id: selected.id,
-        amount: Number(amount),
-        method,
-        paid_date: paidDate,
-        reference,
-      })
-      .select("id")
-      .maybeSingle();
-    if (pErr) {
-      setSaving(false);
-      setError(pErr.message);
-      return;
+    if (inFlight.current) return;
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0 || Math.abs(value * 100 - Math.round(value * 100)) > 0.00001 || !paidDate || paidDate > new Date().toISOString().slice(0, 10)) {
+      setError("Enter a positive amount with at most two decimal places and a date on or before today."); return;
     }
-
-    const { data: bal } = await supabase.from("tenant_balances").select("*").eq("tenant_id", selected.id).maybeSingle();
-    const startFrom =
-      bal?.next_due_date && new Date(bal.next_due_date) > new Date() ? bal.next_due_date : paidDate;
-    const covered = months || 1;
-    const nextDue = addMonths(startFrom, covered);
-    const status = computeStatus(nextDue, 0);
-    await supabase.from("tenant_balances").upsert({
-      tenant_id: selected.id,
-      next_due_date: nextDue,
-      months_in_advance: covered,
-      current_balance: 0,
-      status,
+    const details = JSON.stringify([selected.id, value, method, paidDate, reference]);
+    if (request.current?.details !== details) request.current = { details, id: crypto.randomUUID() };
+    inFlight.current = true;
+    setSaving(true); setError(null); setMsg(null);
+    const { data: result, error: pErr } = await supabase.rpc("rentozi_record_payment", {
+      p_tenant: selected.id, p_amount: value, p_method: method, p_date: paidDate,
+      p_reference: reference, p_request: request.current.id,
     });
+    if (pErr) { inFlight.current = false; setSaving(false); setError(pErr.message); return; }
+    const pay = { id: result.payment_id };
+    const covered = Number(result.months || 0);
+    const nextDue = result.next_due_date;
 
-    if (selected.email && pay?.id) {
+    if (!result.already_processed && selected.email && pay?.id) {
       const receiptLink = `https://rentozi.netlify.app/receipt?id=${pay.id}`;
       await supabase.functions.invoke("send-email", {
         body: {
@@ -172,8 +152,10 @@ export default function RecordPaymentPage() {
       });
     }
 
+    inFlight.current = false;
+    request.current = null;
     setSaving(false);
-    setMsg(`Saved. ${covered} month(s) covered. Next due ${nextDue}.`);
+    setMsg(`Saved. ${covered} complete month(s) credited. Remaining balance ${formatMK(Number(result.balance))}; part-month credit ${formatMK(Number(result.credit))}. Next due ${nextDue}.`);
     setAmount("");
     setReference("");
   };
@@ -212,10 +194,10 @@ export default function RecordPaymentPage() {
               ))}
             </select>
             <label className="text-xs font-semibold text-slate-500">Amount</label>
-            <input required type="number" className="w-full border rounded-xl px-3 py-2 text-sm" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <input required type="number" min="0.01" step="0.01" className="w-full border rounded-xl px-3 py-2 text-sm" value={amount} onChange={(e) => setAmount(e.target.value)} />
             {months > 0 && (
               <p className="text-xs text-emerald-800 bg-emerald-50 px-2 py-1 rounded-md inline-block">
-                This covers {months} month{months === 1 ? "" : "s"}
+                Payment is applied to outstanding rent first. Any remainder stays as credit.
               </p>
             )}
             <label className="text-xs font-semibold text-slate-500">Method</label>
