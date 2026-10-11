@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
+import { privateDocumentUrl } from "@/lib/documents";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", { style: "currency", currency: "MWK", minimumFractionDigits: 0 })
@@ -23,7 +21,7 @@ function addMonths(iso: string, n: number) {
 
 export default function PendingPage() {
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<any[]>([]);
@@ -81,44 +79,13 @@ export default function PendingPage() {
     const row = items.find((x) => x.id === id);
     const t = row ? tenantOf(row) : null;
     const h = row ? houseOf(row) : null;
-    const rent = Number(h?.monthly_rent || 0);
-    const months = rent > 0 ? Math.max(1, Math.round(Number(row.amount) / rent)) : 1;
-
-    const { error: uErr } = await supabase.from("payment_submissions").update({ status }).eq("id", id);
-    if (uErr) {
-      setError(uErr.message);
-      setWorking(null);
-      return;
-    }
-
-    let paymentId: string | null = null;
-    if (status === "confirmed" && row) {
-      const { data: pay } = await supabase
-        .from("payments")
-        .insert({
-          tenant_id: row.tenant_id,
-          amount: row.amount,
-          method: row.method,
-          paid_date: row.paid_date,
-          reference: row.reference_used,
-        })
-        .select("id")
-        .maybeSingle();
-      paymentId = pay?.id || null;
-
-      const { data: bal } = await supabase.from("tenant_balances").select("*").eq("tenant_id", row.tenant_id).maybeSingle();
-      const startFrom = bal?.next_due_date && new Date(bal.next_due_date) > new Date()
-        ? bal.next_due_date
-        : row.paid_date || new Date().toISOString().slice(0, 10);
-      const nextDue = addMonths(startFrom, months);
-      await supabase.from("tenant_balances").upsert({
-        tenant_id: row.tenant_id,
-        next_due_date: nextDue,
-        months_in_advance: months,
-        current_balance: 0,
-        status: "paid",
-      });
-    }
+    if (working) return;
+    setError(null);
+    const { data: result, error: rpcError } = await supabase.rpc("rentozi_review_submission", { p_id: id, p_approve: status === "confirmed" });
+    if (rpcError) { setError(rpcError.message); setWorking(null); return; }
+    const paymentId = result?.payment_id || null;
+    const months = Number(result?.months || 0);
+    if (result?.already_processed) { setWorking(null); await load(); return; }
 
     if (t?.email) {
       const receiptLink = paymentId
@@ -165,7 +132,7 @@ export default function PendingPage() {
           const t = tenantOf(row);
           const h = houseOf(row);
           const rent = Number(h?.monthly_rent || 0);
-          const months = rent > 0 ? Math.max(1, Math.round(Number(row.amount) / rent)) : 1;
+          
           return (
             <div key={row.id} className="bg-white border rounded-2xl p-4 space-y-2">
               <div className="flex justify-between gap-3">
@@ -176,10 +143,14 @@ export default function PendingPage() {
                 <p className="font-bold text-emerald-700">{formatMK(Number(row.amount))}</p>
               </div>
               <p className="text-sm text-slate-600">{row.method} · {row.paid_date} · {row.reference_used || "no ref"}</p>
-              <p className="text-xs text-emerald-800 bg-emerald-50 inline-block px-2 py-1 rounded-md">Will cover {months} month{months === 1 ? "" : "s"}</p>
+              <p className="text-xs text-emerald-800 bg-emerald-50 inline-block px-2 py-1 rounded-md">Applied to the rent balance when confirmed; partial payments remain credited.</p>
               <div className="flex gap-2 pt-1">
-                <button disabled={working === row.id} onClick={() => decide(row.id, "confirmed")} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm">Confirm</button>
-                <button disabled={working === row.id} onClick={() => decide(row.id, "rejected")} className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm">Reject</button>
+                {row.proof_path && <button type="button" onClick={async () => {
+                  try { window.open(await privateDocumentUrl("payment-proofs", row.proof_path), "_blank", "noopener,noreferrer"); }
+                  catch (e: any) { setError(e.message); }
+                }} className="border px-3 py-1.5 rounded-lg text-sm">View proof</button>}
+                <button disabled={!!working} onClick={() => decide(row.id, "confirmed")} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm">Confirm</button>
+                <button disabled={!!working} onClick={() => decide(row.id, "rejected")} className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm">Reject</button>
               </div>
             </div>
           );
