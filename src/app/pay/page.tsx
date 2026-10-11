@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
+import { currentBalance } from "@/lib/accounting";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -41,9 +39,12 @@ export default function TenantPayPage() {
     new Date().toISOString().slice(0, 10)
   );
   const [notes, setNotes] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [airtel, setAirtel] = useState("");
+  const [mpamba, setMpamba] = useState("");
 
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
   useEffect(() => {
     async function load() {
@@ -58,7 +59,7 @@ export default function TenantPayPage() {
       const { data: tenant } = await supabase
         .from("tenants")
         .select(
-          `id, full_name, houses ( name, code, monthly_rent, bank_account )`
+          `id, full_name, landlord_id, houses ( name, code, monthly_rent, bank_account )`
         )
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
@@ -77,7 +78,15 @@ export default function TenantPayPage() {
       setName(tenant.full_name || "");
       setHouseName(house?.name || "");
       setHouseCode(house?.code || "");
-      setBankAccount(house?.bank_account || "1924966");
+      const { data: landlord } = await supabase
+        .from("landlords")
+        .select("bank_name, bank_account, airtel_number, mpamba_number")
+        .eq("id", tenant.landlord_id)
+        .maybeSingle();
+      setBankAccount(house?.bank_account || landlord?.bank_account || "");
+      setBankName(landlord?.bank_name || "Bank transfer");
+      setAirtel(landlord?.airtel_number || "");
+      setMpamba(landlord?.mpamba_number || "");
       setRent(Number(house?.monthly_rent || 0));
       setReference(
         `${house?.code || "H"}-${(tenant.full_name || "").replace(/\s+/g, "")}`
@@ -86,12 +95,12 @@ export default function TenantPayPage() {
 
       const { data: bal } = await supabase
         .from("tenant_balances")
-        .select("current_balance, next_due_date")
+        .select("*")
         .eq("tenant_id", tenant.id)
         .maybeSingle();
 
       if (bal) {
-        setBalance(Number(bal.current_balance || 0));
+        setBalance(currentBalance(bal, Number(house?.monthly_rent || 0)));
         setNextDue(bal.next_due_date);
       }
 
@@ -102,8 +111,9 @@ export default function TenantPayPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId || !amount) {
-      setError("Amount is required");
+    const paymentAmount = Number(amount);
+    if (!tenantId || !Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      setError("Enter a valid amount greater than zero");
       return;
     }
 
@@ -114,7 +124,7 @@ export default function TenantPayPage() {
     // Insert as pending submission for landlord to confirm
     const { error: insError } = await supabase.from("payment_submissions").insert({
       tenant_id: tenantId,
-      amount: Number(amount),
+      amount: paymentAmount,
       method,
       reference_used: reference || null,
       paid_date: paidDate,
@@ -125,19 +135,8 @@ export default function TenantPayPage() {
     setSubmitting(false);
 
     if (insError) {
-      // Fallback if table name differs
-      const { error: altError } = await supabase.from("payments").insert({
-        tenant_id: tenantId,
-        amount: Number(amount),
-        method,
-        paid_date: paidDate,
-        notes: `REF: ${reference}. ${notes || ""} (tenant submitted – confirm)`,
-      });
-
-      if (altError) {
-        setError(insError.message + " / " + altError.message);
-        return;
-      }
+      setError("Payment was not submitted. Please try again or contact your landlord. " + insError.message);
+      return;
     }
 
     setSuccess(
@@ -188,18 +187,19 @@ export default function TenantPayPage() {
         <div className="bg-white rounded-2xl border p-5 shadow-sm space-y-3">
           <h2 className="font-semibold text-slate-900">Where to pay</h2>
           <div className="text-sm space-y-2">
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-500">National Bank</span>
+            {bankAccount && <div className="flex justify-between gap-2">
+              <span className="text-slate-500">{bankName}</span>
               <span className="font-semibold text-right">{bankAccount}</span>
-            </div>
-            <div className="flex justify-between gap-2">
+            </div>}
+            {airtel && <div className="flex justify-between gap-2">
               <span className="text-slate-500">Airtel Money</span>
-              <span className="font-semibold">0995684682</span>
-            </div>
-            <div className="flex justify-between gap-2">
+              <span className="font-semibold">{airtel}</span>
+            </div>}
+            {mpamba && <div className="flex justify-between gap-2">
               <span className="text-slate-500">TNM Mpamba</span>
-              <span className="font-semibold">0888381177</span>
-            </div>
+              <span className="font-semibold">{mpamba}</span>
+            </div>}
+            {!bankAccount && !airtel && !mpamba && <p>Contact your landlord for confirmed payment details before transferring money.</p>}
             <div className="flex justify-between gap-2">
               <span className="text-slate-500">Reference</span>
               <span className="font-bold text-emerald-700 text-right break-all">
@@ -239,6 +239,8 @@ export default function TenantPayPage() {
             </label>
             <input
               type="number"
+              min="0.01"
+              step="0.01"
               required
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
