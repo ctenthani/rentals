@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { validateDocument } from "@/lib/documents";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 const DEFAULT_TERMS = `1. PARTIES AND PREMISES
 The Landlord lets and the Tenant takes the premises described in this agreement for residential use only.
@@ -45,7 +43,7 @@ function money(n: any) {
 
 export default function LeasePage() {
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -126,7 +124,7 @@ export default function LeasePage() {
       const { data: pub } = await supabase.rpc("landlord_public", { p_id: t.landlord_id });
       setLandlord(pub);
 
-      const { data: lease } = await supabase.from("leases").select("*").eq("tenant_id", t.id).maybeSingle();
+      const { data: lease } = await supabase.from("leases").select("*").eq("tenant_id", t.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
       setForm({
         id_number: lease?.id_number || "",
@@ -205,8 +203,9 @@ export default function LeasePage() {
     setError(null);
     let docPath = form.id_doc_path;
     if (tenantMode && idFile) {
-      const path = `ids/${tenant.id}/${Date.now()}-${idFile.name}`;
-      const { error: upErr } = await supabase.storage.from("lease-docs").upload(path, idFile, { upsert: true });
+      try { validateDocument(idFile); } catch (e: any) { setSaving(false); setError(e.message); return; }
+      const path = `${tenant.id}/${Date.now()}-${idFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("tenant-ids").upload(path, idFile);
       if (upErr) {
         setSaving(false);
         setError(upErr.message);
@@ -217,9 +216,9 @@ export default function LeasePage() {
 
     const payload: any = {
       tenant_id: tenant.id,
+      house_id: tenant.house_id,
+      landlord_id: tenant.landlord_id,
       terms: form.terms,
-      id_number: form.id_number,
-      id_doc_path: docPath,
       move_in: form.move_in || null,
       lease_start: form.lease_start || null,
       lease_end: form.lease_end || null,
@@ -229,15 +228,17 @@ export default function LeasePage() {
       deposit: Number(form.deposit || 0),
       payment_day: Number(form.payment_day || 1),
       notice_days: Number(form.notice_days || 30),
-      tenant_signature: tenantMode ? drawn : form.tenant_signature,
       landlord_signature: tenantMode ? form.landlord_signature : drawn || form.landlord_signature,
     };
 
-    const { data: existing } = await supabase.from("leases").select("id").eq("tenant_id", tenant.id).maybeSingle();
+    const { data: existing } = await supabase.from("leases").select("id").eq("tenant_id", tenant.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const { tenant_id: ignoredTenantId, ...updates } = payload;
     const q = existing?.id
-      ? supabase.from("leases").update(payload).eq("id", existing.id)
+      ? supabase.from("leases").update(updates).eq("id", existing.id)
       : supabase.from("leases").insert(payload);
-    const { error: uErr } = await q;
+    const { error: uErr } = tenantMode
+      ? await supabase.rpc("rentozi_sign_lease", { p_tenant: tenant.id, p_signature: drawn, p_name: tenant.full_name, p_number: form.id_number, p_doc_path: docPath })
+      : await q;
     if (uErr) {
       setSaving(false);
       setError(uErr.message);
