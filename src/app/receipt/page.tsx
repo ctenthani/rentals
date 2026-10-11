@@ -1,14 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -48,7 +43,7 @@ export default function ReceiptPage() {
 
       const { data: p, error: pErr } = await supabase
         .from("payments")
-        .select("id, amount, method, paid_date, created_at, tenant_id, reference")
+        .select("id, amount, method, paid_date, created_at, tenant_id, reference, months_covered, voided_at, void_reason")
         .eq("id", id)
         .maybeSingle();
       if (pErr || !p) {
@@ -73,7 +68,7 @@ export default function ReceiptPage() {
           .maybeSingle();
         setHouse(h);
         const rent = Number(h?.monthly_rent || 0);
-        const covered = rent > 0 ? Math.max(1, Math.round(Number(p.amount) / rent)) : 1;
+        const covered = rent > 0 ? Math.max(0, Number(p.months_covered || 0)) : 1;
         setMonths(covered);
       }
 
@@ -83,12 +78,7 @@ export default function ReceiptPage() {
         .eq("tenant_id", p.tenant_id)
         .maybeSingle();
       if (bal?.next_due_date) setNextDue(bal.next_due_date);
-      else {
-        const start = p.paid_date || p.created_at?.slice(0, 10);
-        const rent = Number((await supabase.from("houses").select("monthly_rent").eq("id", t?.house_id).maybeSingle()).data?.monthly_rent || 0);
-        const covered = rent > 0 ? Math.max(1, Math.round(Number(p.amount) / rent)) : 1;
-        if (start) setNextDue(addMonths(start, covered));
-      }
+
 
       if (t?.landlord_id) {
         const { data: pub } = await supabase.rpc("landlord_public", { p_id: t.landlord_id });
@@ -122,6 +112,7 @@ export default function ReceiptPage() {
         </button>
       </div>
 
+      {pay.voided_at && <p className="max-w-xl mx-auto mb-3 p-3 bg-red-50 text-red-800">REVERSED — {pay.void_reason}. This receipt is retained for audit.</p>}
       <article className="max-w-xl mx-auto bg-white border-2 border-slate-800 p-8 text-slate-900">
         <p className="text-center text-[11px] tracking-[0.2em] uppercase text-slate-500">Official receipt</p>
         <h1 className="text-center text-2xl font-bold mt-1">{biz}</h1>
@@ -131,7 +122,7 @@ export default function ReceiptPage() {
         <p className="text-sm mb-4">
           Dear {tenant?.full_name || "Tenant"},
         </p>
-        <p className="text-sm mb-4">Your rent payment has been received and confirmed.</p>
+        <p className="text-sm mb-4">{pay.voided_at ? "This payment has been reversed." : "Your rent payment has been received and confirmed."}</p>
 
         <div className="text-sm space-y-1">
           <p>
@@ -158,7 +149,7 @@ export default function ReceiptPage() {
             <strong>Months covered:</strong> {months}
           </p>
           <p>
-            <strong>Next due date:</strong> {nextDue || "—"}
+            <strong>Current account next due date:</strong> {nextDue || "—"}
           </p>
         </div>
 

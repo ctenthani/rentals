@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { currentBalance } from "@/lib/accounting";
+import { validateDocument } from "@/lib/documents";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -92,7 +91,7 @@ async function notifyOwner(
 
 export default function TenantPage() {
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
   const [tab, setTab] = useState<"home" | "pay" | "issues">("home");
   const [loading, setLoading] = useState(true);
@@ -117,6 +116,7 @@ export default function TenantPage() {
     const { data } = await supabase
       .from("payments")
       .select("id, amount, paid_date, method, created_at")
+      .is("voided_at", null)
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false });
     setPayments(data || []);
@@ -186,10 +186,16 @@ export default function TenantPage() {
   const submitPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
+    const paymentAmount = Number(amount);
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      setError("Enter a valid amount greater than zero");
+      return;
+    }
     setError(null);
     setMsg(null);
     let proof: string | null = null;
     if (file) {
+      try { validateDocument(file); } catch (e: any) { setError(e.message); return; }
       const path = `${selected.id}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage.from("payment-proofs").upload(path, file);
       if (upErr) {
@@ -200,7 +206,7 @@ export default function TenantPage() {
     }
     const { error: insErr } = await supabase.from("payment_submissions").insert({
       tenant_id: selected.id,
-      amount: Number(amount),
+      amount: paymentAmount,
       method,
       reference_used: reference,
       paid_date: paidDate || new Date().toISOString().slice(0, 10),
@@ -264,7 +270,7 @@ export default function TenantPage() {
     );
   }
 
-  const status = computeStatus(selected.balance?.next_due_date || null, Number(selected.balance?.current_balance || 0));
+  const status = computeStatus(selected.balance?.next_due_date || null, currentBalance(selected.balance, Number(selected.house?.monthly_rent || 0)));
   const months = cycleMonths(selected.balance?.next_due_date, Number(selected.balance?.months_in_advance || 0));
 
   return (
@@ -339,6 +345,7 @@ export default function TenantPage() {
                 <StatusBadge status={status} />
               </div>
               <p className="text-sm">Rent {formatMK(Number(selected.house?.monthly_rent || 0))}</p>
+              <p className="text-sm">Outstanding {formatMK(currentBalance(selected.balance, Number(selected.house?.monthly_rent || 0)))} · Part-month credit {formatMK(Number(selected.balance?.partial_credit || 0))}</p>
               <p className="text-sm">
                 Next due <strong>{selected.balance?.next_due_date || "Not set"}</strong>
               </p>

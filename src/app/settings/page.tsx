@@ -1,17 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -19,6 +16,7 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [landlordId, setLandlordId] = useState<string | null>(null);
   const [isOwner, setIsOwner] = useState(false);
+  const [isPlatformOwner, setIsPlatformOwner] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [businessName, setBusinessName] = useState("");
@@ -32,15 +30,12 @@ export default function SettingsPage() {
   const [newLlName, setNewLlName] = useState("");
   const [newLlBiz, setNewLlBiz] = useState("");
   const [newLlEmail, setNewLlEmail] = useState("");
-  const [newLlPass, setNewLlPass] = useState("123456");
 
   const [cmName, setCmName] = useState("");
   const [cmEmail, setCmEmail] = useState("");
-  const [cmPass, setCmPass] = useState("123456");
 
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
-  const [deleteWord, setDeleteWord] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -59,6 +54,7 @@ export default function SettingsPage() {
         return;
       }
       setLandlordId(lid);
+      setIsPlatformOwner(["ctenthani@gmail.com", "ctenthani@mubas.ac.mw"].includes((session.user.email || "").toLowerCase()));
 
       const { data: own } = await supabase
         .from("landlords")
@@ -68,8 +64,8 @@ export default function SettingsPage() {
 
       const row = own || {
         id: lid,
-        full_name: "Chifundo and Wezzie Tenthani",
-        business_name: "Chifundo and Wezzie",
+        full_name: "Your business",
+        business_name: "Your business",
         email: session.user.email,
       };
 
@@ -131,33 +127,32 @@ export default function SettingsPage() {
 
   const createLandlord = async () => {
     setError(null);
-    const { error: fnErr } = await supabase.functions.invoke("create-landlord", {
+    const { data, error: fnErr } = await supabase.functions.invoke("create-new-landlord", {
       body: {
         full_name: newLlName,
         business_name: newLlBiz,
         email: newLlEmail,
-        password: newLlPass,
       },
     });
-    if (fnErr) setError(fnErr.message);
-    else setMsg("New landlord created. They will receive a login email.");
+    if (fnErr || data?.error) setError(fnErr?.message || data.error);
+    else setMsg("Landlord invitation sent. They choose their own password.");
   };
 
   const addManager = async () => {
     setError(null);
-    const { error: fnErr } = await supabase.functions.invoke("create-manager", {
+    const { data, error: fnErr } = await supabase.functions.invoke("create-manager", {
       body: {
         landlord_id: landlordId,
         full_name: cmName,
         email: cmEmail,
-        password: cmPass,
       },
     });
-    if (fnErr) setError(fnErr.message);
-    else setMsg("Co-manager added. They received a login email.");
+    if (fnErr || data?.error) setError(fnErr?.message || data.error);
+    else setMsg("Invitation sent. The co-manager chooses their own password.");
   };
 
   const changePassword = async () => {
+    if (pw1.length < 8) { setError("Choose at least eight characters."); return; }
     if (pw1 !== pw2) {
       setError("Passwords do not match");
       return;
@@ -187,14 +182,13 @@ export default function SettingsPage() {
         {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
         {msg && <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">{msg}</p>}
 
-        {isOwner && (
+        {isPlatformOwner && (
           <section className="bg-white rounded-2xl border p-5 space-y-2">
             <h2 className="font-bold">Create new landlord</h2>
             <p className="text-xs text-slate-500">Separate empty business. They get a login email.</p>
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Landlord name" value={newLlName} onChange={(e) => setNewLlName(e.target.value)} />
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Business name" value={newLlBiz} onChange={(e) => setNewLlBiz(e.target.value)} />
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Login email" value={newLlEmail} onChange={(e) => setNewLlEmail(e.target.value)} />
-            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Password" value={newLlPass} onChange={(e) => setNewLlPass(e.target.value)} />
             <button onClick={createLandlord} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm">
               Create landlord
             </button>
@@ -203,15 +197,26 @@ export default function SettingsPage() {
 
         <section className="bg-white rounded-2xl border p-5 space-y-2">
           <h2 className="font-bold">Co-managers</h2>
-          <p className="text-xs text-slate-500">Same properties as this account. They get a login email.</p>
+          {!isOwner && <p className="text-xs text-slate-500">Only the account owner can invite co-managers.</p>}
+          <p className="text-xs text-slate-500">Same properties as this account. New users choose their own password from the invitation link.</p>
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Name" value={cmName} onChange={(e) => setCmName(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Email" value={cmEmail} onChange={(e) => setCmEmail(e.target.value)} />
-          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Password" value={cmPass} onChange={(e) => setCmPass(e.target.value)} />
-          <button onClick={addManager} className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-xl text-sm">
-            Add co-manager
+          <button disabled={!isOwner} onClick={addManager} className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-xl text-sm">
+            Invite new co-manager
           </button>
         </section>
 
+        {isOwner && <section className="bg-white rounded-2xl border p-5 space-y-2">
+          <h2 className="font-bold">Add an existing co-manager</h2>
+          <p className="text-xs text-slate-500">They keep their password. This gives the existing user access to your rental business.</p>
+          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Existing user's email" value={cmEmail} onChange={e => setCmEmail(e.target.value)} />
+          <button className="border rounded-xl px-4 py-2 text-sm" onClick={async () => {
+            if (!confirm("Give this existing user co-manager access to your properties?")) return;
+            const { data, error } = await supabase.rpc("invite_landlord_member", { p_email: cmEmail.trim() });
+            if (error || !data?.success) setError(error?.message || data?.error || "Could not add member");
+            else setMsg("Existing user added as co-manager. Their password is unchanged.");
+          }}>Add existing user</button>
+        </section>}
         <section className="bg-white rounded-2xl border p-5 space-y-2">
           <h2 className="font-bold">Business</h2>
           <p className="text-xs text-slate-500">This email receives payment reports, issues and lease signatures.</p>
@@ -244,21 +249,9 @@ export default function SettingsPage() {
           </button>
         </section>
 
-        <section className="bg-white rounded-2xl border border-red-200 p-5 space-y-2">
-          <h2 className="font-bold text-red-700">Delete account</h2>
-          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Type DELETE" value={deleteWord} onChange={(e) => setDeleteWord(e.target.value)} />
-          <button
-            disabled={deleteWord !== "DELETE" || !landlordId}
-            onClick={async () => {
-              if (!landlordId) return;
-              await supabase.from("landlords").delete().eq("id", landlordId);
-              await supabase.auth.signOut();
-              router.push("/auth/login");
-            }}
-            className="bg-red-600 text-white px-4 py-2 rounded-xl text-sm disabled:opacity-40"
-          >
-            Delete my account
-          </button>
+        <section className="bg-white rounded-2xl border p-5 space-y-2">
+          <h2 className="font-bold">Account closure</h2>
+          <p className="text-sm text-slate-600">Archive properties from the dashboard to preserve receipts. Contact support for account closure and data export.</p>
         </section>
       </main>
     </div>

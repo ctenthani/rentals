@@ -1,6 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Preserve the existing border colour while using Tailwind 4's engine. */
+@layer base {
+  *, ::before, ::after { border-color: var(--color-gray-200, currentColor); }
+}
 
 body {
   margin: 0;

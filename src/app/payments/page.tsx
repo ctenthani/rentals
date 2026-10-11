@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -40,7 +37,7 @@ function computeStatus(nextDue: string | null, balance: number) {
 
 export default function PaymentsPage() {
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<any[]>([]);
@@ -48,46 +45,7 @@ export default function PaymentsPage() {
   const [tenantIds, setTenantIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  async function refreshBalance(tenantId: string) {
-    const { data: pays } = await supabase
-      .from("payments")
-      .select("amount, paid_date, created_at")
-      .eq("tenant_id", tenantId)
-      .order("paid_date", { ascending: false });
-
-    const { data: t } = await supabase
-      .from("tenants")
-      .select("houses(monthly_rent)")
-      .eq("id", tenantId)
-      .maybeSingle();
-    const house = Array.isArray(t?.houses) ? t?.houses[0] : t?.houses;
-    const rent = Number(house?.monthly_rent || 0);
-
-    if (!pays || pays.length === 0) {
-      await supabase.from("tenant_balances").upsert({
-        tenant_id: tenantId,
-        months_in_advance: 0,
-        next_due_date: null,
-        current_balance: rent,
-        status: "upcoming",
-      });
-      return;
-    }
-
-    const last = pays[0];
-    const months = rent > 0 ? Math.max(1, Math.round(Number(last.amount) / rent)) : 1;
-    const start = last.paid_date || last.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
-    const nextDue = addMonths(start, months);
-    const status = computeStatus(nextDue, 0);
-    await supabase.from("tenant_balances").upsert({
-      tenant_id: tenantId,
-      months_in_advance: months,
-      next_due_date: nextDue,
-      current_balance: status === "paid" ? 0 : rent,
-      status,
-    });
-  }
-
+  const [reason, setReason] = useState("");
   async function load() {
     const {
       data: { session },
@@ -112,7 +70,7 @@ export default function PaymentsPage() {
     }
     const { data, error: qErr } = await supabase
       .from("payments")
-      .select("id, amount, method, paid_date, created_at, tenant_id, tenants(full_name, houses(name, code))")
+      .select("id, amount, method, paid_date, created_at, tenant_id, request_id, voided_at, void_reason, tenants(full_name, houses(name, code))")
       .in("tenant_id", ids)
       .order("created_at", { ascending: false });
     if (qErr) setError(qErr.message);
@@ -133,24 +91,18 @@ export default function PaymentsPage() {
 
   const selectedIds = Object.keys(picked).filter((id) => picked[id]);
 
-  const deleteSelected = async () => {
-    if (!selectedIds.length || !confirm("Delete the selected payments and rebuild those tenants' cycles?")) return;
-    setBusy(true);
-    const affected = Array.from(new Set(rows.filter((r) => selectedIds.includes(r.id)).map((r) => r.tenant_id)));
-    await supabase.from("payments").delete().in("id", selectedIds);
-    for (const tid of affected) await refreshBalance(tid);
+  const reverse = async (ids: string[]) => {
+    if (!ids.length || busy) return;
+    if (reason.trim().length < 5) { setError("Enter a reversal reason of at least five characters."); return; }
+    if (!confirm("Reverse these payments? The original receipts and the reason remain in the audit history.")) return;
+    setBusy(true); setError(null);
+    const { error: rpcError } = await supabase.rpc("rentozi_reverse_payments", { p_ids: ids, p_reason: reason.trim() });
     setBusy(false);
-    await load();
+    if (rpcError) { setError(rpcError.message); return; }
+    setReason(""); await load();
   };
-
-  const clearAll = async () => {
-    if (!tenantIds.length || !confirm("Delete ALL payments and reset every cycle / status?")) return;
-    setBusy(true);
-    await supabase.from("payments").delete().in("tenant_id", tenantIds);
-    for (const tid of tenantIds) await refreshBalance(tid);
-    setBusy(false);
-    await load();
-  };
+  const deleteSelected = () => reverse(selectedIds);
+  const clearAll = () => reverse(rows.filter(r => r.request_id && !r.voided_at).map(r => r.id));
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading...</div>;
@@ -168,20 +120,22 @@ export default function PaymentsPage() {
       </header>
       <main className="max-w-3xl mx-auto p-4 space-y-3">
         {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+        <p className="text-sm text-slate-600">Reverse mistakes instead of deleting receipts. Reverse newer payments first. Historical payments require reconciliation.</p>
+        <label className="block text-sm">Reason for reversal<input value={reason} onChange={e => setReason(e.target.value)} className="block w-full border rounded-xl p-2 mt-1" maxLength={500} /></label>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={deleteSelected}
             disabled={!selectedIds.length || busy}
             className="border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
           >
-            Delete selected ({selectedIds.length})
+            Reverse selected ({selectedIds.length})
           </button>
           <button
             onClick={clearAll}
-            disabled={busy || !rows.length}
+            disabled={busy || !rows.some(r => r.request_id && !r.voided_at)}
             className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
           >
-            Clear all payments
+            Reverse all new payments
           </button>
         </div>
         {rows.length === 0 && (
@@ -199,6 +153,8 @@ export default function PaymentsPage() {
             <div key={row.id} className="bg-white border rounded-2xl p-4 flex gap-3 items-start">
               <input
                 type="checkbox"
+                aria-label={`Select payment for ${t?.full_name || "tenant"}`}
+                disabled={!row.request_id || !!row.voided_at || busy}
                 className="mt-1"
                 checked={!!picked[row.id]}
                 onChange={(e) => setPicked((p) => ({ ...p, [row.id]: e.target.checked }))}
@@ -206,6 +162,7 @@ export default function PaymentsPage() {
               <div className="flex-1 flex justify-between gap-3">
                 <div>
                   <p className="font-bold">{t?.full_name || "Tenant"}</p>
+                  {row.voided_at && <p className="text-sm text-red-700">Reversed: {row.void_reason}</p>}
                   <p className="text-xs text-slate-500">
                     {h?.code} — {h?.name}
                   </p>

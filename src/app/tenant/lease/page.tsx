@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { documentPath, privateDocumentUrl, validateDocument } from "@/lib/documents";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
-const LANDLORD_BUSINESS_DEFAULT = "Chifundo and Wezzie";
-const LANDLORD_NAME_DEFAULT = "Chifundo and Wezzie Tenthani";
+const LANDLORD_BUSINESS_DEFAULT = "Your landlord";
+const LANDLORD_NAME_DEFAULT = "Your landlord";
 
 function formatMK(amount: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -192,7 +190,7 @@ export default function TenantLeasePage() {
   const [idDocUrl, setIdDocUrl] = useState<string | null>(null);
 
   const router = useRouter();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
   useEffect(() => {
     async function load() {
@@ -234,7 +232,7 @@ export default function TenantLeasePage() {
       setIdNumber(tenant.national_id || "");
       if (tenant.id_document_url) {
         setIdDocUrl(tenant.id_document_url);
-        setIdPreview(tenant.id_document_url);
+        try { setIdPreview(await privateDocumentUrl("tenant-ids", tenant.id_document_url)); } catch { setError("Could not open the private ID document. Try signing in again."); }
       }
 
       // Landlord name — always show defaults, then override from DB if present
@@ -284,6 +282,7 @@ export default function TenantLeasePage() {
       setError("Upload a photo or PDF of your National ID or passport");
       return;
     }
+    try { validateDocument(file); } catch (e: any) { setError(e.message); return; }
     setIdFile(file);
     if (file.type.startsWith("image/")) {
       const reader = new FileReader();
@@ -329,26 +328,15 @@ export default function TenantLeasePage() {
         setError(upErr.message);
         return;
       }
-      const { data: pub } = supabase.storage
-        .from("tenant-ids")
-        .getPublicUrl(path);
-      uploadedUrl = pub.publicUrl;
-      setIdDocUrl(uploadedUrl);
+      uploadedUrl = path;
+      setIdDocUrl(path);
     }
-
-    // Save ID on tenant record
-    await supabase
-      .from("tenants")
-      .update({
-        national_id: idNumber.trim(),
-        id_document_url: uploadedUrl,
-        id_document_type: idType,
-      })
-      .eq("id", tenantId);
-
-    const { data, error: rpcError } = await supabase.rpc("tenant_sign_lease", {
-      p_tenant_signature: tenantSig,
-      p_tenant_signer_name: tenantSigner || tenantName,
+    const { error: identityError } = await supabase.rpc("rentozi_save_identity", {
+      p_tenant: tenantId, p_number: idNumber.trim(), p_document: documentPath("tenant-ids", uploadedUrl!), p_type: idType,
+    });
+    if (identityError) { setSaving(false); setError(identityError.message); return; }
+    const { data, error: rpcError } = await supabase.rpc("rentozi_sign_lease", {
+      p_tenant: tenantId, p_signature: tenantSig, p_name: tenantSigner || tenantName,
     });
 
     setSaving(false);
