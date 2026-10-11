@@ -1,15 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { currentBalance } from "@/lib/accounting";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function formatMK(n: number) {
   return new Intl.NumberFormat("en-MW", {
@@ -99,7 +95,6 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loginPassword, setLoginPassword] = useState("123456");
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({
     house_name: "",
@@ -152,7 +147,7 @@ export default function DashboardPage() {
 
     const { data: tenants } = await supabase
       .from("tenants")
-      .select("id, full_name, phone, email, auth_user_id, house_id")
+      .select("id, full_name, phone, email, auth_user_id, house_id, is_active")
       .eq("landlord_id", landlordId)
       .order("full_name");
 
@@ -185,9 +180,11 @@ export default function DashboardPage() {
         const b = balances.find((x) => x.tenant_id === t.id);
         const nextDue = b?.next_due_date || null;
         const rent = Number(house?.monthly_rent || 0);
-        const balAmt = liveBalance(nextDue, Number(b?.current_balance || 0), rent);
+        const balAmt = currentBalance(b, rent);
         return {
           id: t.id,
+          is_active: t.is_active,
+          partial_credit: Number(b?.partial_credit || 0),
           full_name: t.full_name,
           phone: t.phone,
           email: t.email,
@@ -212,7 +209,7 @@ export default function DashboardPage() {
   }, [router]);
 
   const totals = {
-    expected: rows.reduce((s, r) => s + r.monthly_rent, 0),
+    expected: rows.filter(r => r.is_active !== false).reduce((s, r) => s + r.monthly_rent, 0),
     outstanding: rows.reduce((s, r) => s + r.current_balance, 0),
     paid: rows.filter((r) => r.status === "paid").length,
     overdue: rows.filter((r) => r.status === "overdue" || r.status === "due").length,
@@ -222,35 +219,14 @@ export default function DashboardPage() {
     if (!editing) return;
     setSaving(true);
     setError(null);
-    await supabase
-      .from("tenants")
-      .update({
-        full_name: editing.full_name,
-        phone: editing.phone,
-        email: editing.email,
-      })
-      .eq("id", editing.id);
-    if (editing.house_id) {
-      await supabase
-        .from("houses")
-        .update({
-          name: editing.house_name,
-          code: editing.house_code,
-          monthly_rent: Number(editing.monthly_rent),
-          bank_account: editing.bank_account,
-        })
-        .eq("id", editing.house_id);
-    }
-    const nextDue = editing.next_due_date || null;
-    const rent = Number(editing.monthly_rent || 0);
-    const balAmt = liveBalance(nextDue, Number(editing.current_balance || 0), rent);
-    await supabase.from("tenant_balances").upsert({
-      tenant_id: editing.id,
-      next_due_date: nextDue,
-      months_in_advance: Number(editing.months_in_advance || 0),
+    const { error: updateError } = await supabase.rpc("rentozi_update_property", { p_tenant: editing.id, p_details: {
+      full_name: editing.full_name, phone: editing.phone, email: editing.email,
+      house_name: editing.house_name, house_code: editing.house_code,
+      monthly_rent: Number(editing.monthly_rent), bank_account: editing.bank_account,
+      next_due_date: editing.next_due_date || null, months_in_advance: Number(editing.months_in_advance || 0),
       current_balance: Number(editing.current_balance || 0),
-      status: computeStatus(nextDue, balAmt),
-    });
+    }});
+    if (updateError) { setSaving(false); setError(updateError.message); return; }
     setSaving(false);
     setEditing(null);
     await loadData();
@@ -265,7 +241,6 @@ export default function DashboardPage() {
     const { data, error: fnErr } = await supabase.functions.invoke("create-tenant-user", {
       body: {
         email: editing.email.trim(),
-        password: loginPassword,
         tenant_id: editing.id,
         full_name: editing.full_name,
       },
@@ -275,7 +250,7 @@ export default function DashboardPage() {
       setError(fnErr?.message || data?.error);
       return;
     }
-    alert(`Login created for ${editing.email}. Password: ${loginPassword}`);
+    alert(`Invitation sent to ${editing.email}. They will choose their own password from the email link.`);
     await loadData();
   };
 
@@ -311,10 +286,11 @@ export default function DashboardPage() {
   };
 
   const handleDelete = async (tenantId: string) => {
-    if (!confirm("Remove this property/tenant?")) return;
-    await supabase.rpc("landlord_delete_property", { p_tenant_id: tenantId });
-    setEditing(null);
-    await loadData();
+    const archived = rows.find(r => r.id === tenantId)?.is_active === false;
+    if (!confirm(archived ? "Restore this property and tenant?" : "Archive this property and tenant? Receipts and balances will be preserved.")) return;
+    const { error: rpcError } = await supabase.rpc(archived ? "rentozi_restore_property" : "landlord_delete_property", { p_tenant_id: tenantId });
+    if (rpcError) { setError(rpcError.message); return; }
+    setEditing(null); await loadData();
   };
 
   const handleLogout = async () => {
@@ -430,7 +406,7 @@ export default function DashboardPage() {
                 <tr key={r.id} className="border-t">
                   <td className="px-2 py-2 font-medium">
                     {r.house_code}
-                    <div className="text-[10px] text-slate-400">{r.house_name}</div>
+                    <div className="text-[10px] text-slate-400">{r.house_name}{r.is_active === false && <span className="ml-2 text-xs text-slate-500">Archived</span>}</div>
                   </td>
                   <td className="px-2 py-2">
                     {r.full_name}
@@ -507,27 +483,26 @@ export default function DashboardPage() {
               value={editing.months_in_advance}
               onChange={(e) => setEditing({ ...editing, months_in_advance: e.target.value })}
             />
-            <label className="text-xs font-semibold text-slate-500">Stored balance (live overdue still uses rent × months late)</label>
+            <label className="text-xs font-semibold text-slate-500">Current balance (changes are recorded as account adjustments)</label>
             <input
               type="number"
               className="w-full border rounded-xl px-3 py-2 text-sm"
               value={editing.current_balance}
               onChange={(e) => setEditing({ ...editing, current_balance: e.target.value })}
             />
-            <label className="text-xs font-semibold text-slate-500">Default login password</label>
-            <input className="w-full border rounded-xl px-3 py-2 text-sm" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
+            <p className="text-xs text-slate-500">New tenants receive an invitation and choose their own password. Existing users keep their login.</p>
             <div className="flex flex-wrap items-center gap-2 pt-2">
               <button onClick={handleSaveEdit} disabled={saving} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">
                 {saving ? "Saving..." : "Save"}
               </button>
               <button type="button" onClick={handleCreateLogin} disabled={saving} className="border px-4 py-2 rounded-xl text-sm font-semibold">
-                Create login
+                Send login invitation
               </button>
               <Link href="/help" className="bg-sky-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">
                 How to use Rentozi
               </Link>
               <button type="button" onClick={() => handleDelete(editing.id)} className="border border-red-200 text-red-600 px-4 py-2 rounded-xl text-sm font-semibold">
-                Delete
+                {editing.is_active === false ? "Restore property" : "Archive property"}
               </button>
               <button type="button" onClick={() => setEditing(null)} className="text-slate-500 px-4 py-2 rounded-xl text-sm font-semibold">
                 Cancel
