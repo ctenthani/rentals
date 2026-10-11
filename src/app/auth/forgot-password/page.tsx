@@ -1,12 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
-const SUPABASE_URL = "https://favhmbrpisstrwgytapl.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmhtYnJwaXNzdHJ3Z3l0YXBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMTM5MzIsImV4cCI6MjEwMTY4OTkzMn0.6V2oE161lKWAATnZDxQiGFLfoRifoRrH7MSb0MHTJ3U";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -14,7 +11,6 @@ export default function ForgotPasswordPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
