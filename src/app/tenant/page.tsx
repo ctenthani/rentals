@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { currentBalance } from "@/lib/accounting";
 import { validateDocument } from "@/lib/documents";
 import { supabase } from "@/lib/supabase";
+import { notifyRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -81,12 +82,7 @@ async function notifyOwner(
   const { data: rpcEmail } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
   const to = String(rpcEmail || fallbackEmail || "").trim();
   if (!to) return { ok: false, error: "Landlord has no email in Settings" };
-  const { data, error } = await supabase.functions.invoke("send-email", {
-    body: { to, subject, html },
-  });
-  if (error) return { ok: false, error: error.message };
-  if (data?.error) return { ok: false, error: String(data.error) };
-  return { ok: true };
+  return notifyRentozi({to,subject,html});
 }
 
 export default function TenantPage() {
@@ -227,7 +223,7 @@ export default function TenantPage() {
        <p>Reference: ${reference || "—"}</p>
        <p><a href="https://rentozi.netlify.app/pending">Open Pending</a></p>`
     );
-    setMsg(mail.ok ? "Submitted. Your landlord was emailed." : `Submitted, but email failed: ${mail.error}`);
+    setMsg(mail.ok ? "Submitted. Email accepted by the provider for your landlord." : `Submitted, but email failed: ${mail.error}`);
     setAmount("");
     setReference("");
     setFile(null);
@@ -256,7 +252,7 @@ export default function TenantPage() {
        <p>${selected.full_name} ${selected.phone || ""}</p>`
     );
     setIssue("");
-    setMsg(mail.ok ? "Issue sent. Your landlord was emailed." : `Saved, but email failed: ${mail.error}`);
+    setMsg(mail.ok ? "Issue sent. Email accepted by the provider for your landlord." : `Saved, but email failed: ${mail.error}`);
   };
 
   if (loading) {
