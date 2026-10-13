@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { notifyRentozi } from "@/lib/messaging";
 import { privateDocumentUrl } from "@/lib/documents";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -91,8 +92,7 @@ export default function PendingPage() {
       const receiptLink = paymentId
         ? `https://rentozi.netlify.app/receipt?id=${paymentId}`
         : "https://rentozi.netlify.app/tenant";
-      await supabase.functions.invoke("send-email", {
-        body: {
+      const delivery = await notifyRentozi({
           to: t.email,
           subject: status === "confirmed" ? `${biz}: rent payment confirmed` : `${biz}: payment not accepted`,
           html:
@@ -108,8 +108,8 @@ export default function PendingPage() {
                  <p>Thank you.<br/>${biz}</p>`
               : `<p style="color:#64748b;font-size:12px">${biz}</p>
                  <p>Your payment of ${formatMK(Number(row.amount))} was not accepted. Contact ${biz}.</p>`,
-        },
       });
+      if(!delivery.ok)setError("Payment decision saved; email notice failed: "+delivery.error);
     }
     setWorking(null);
     await load();

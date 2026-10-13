@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data: signedIn,error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -30,6 +30,12 @@ export default function LoginPage() {
       return;
     }
 
+    const {data:active}=await supabase.rpc("rentozi_user_enabled");
+    if(!active){await supabase.auth.signOut();setLoading(false);setError("This account has been removed. Contact the site owner.");return;}
+    if(signedIn.user?.user_metadata?.role==="landlord"){
+      const {data:existing}=await supabase.rpc("my_landlord_id");
+      if(!existing){const {error:profileError}=await supabase.rpc("create_landlord_profile",{p_full_name:signedIn.user.user_metadata.full_name||"My Rentals",p_business_name:signedIn.user.user_metadata.business_name||"My Rentals"});if(profileError){setLoading(false);setError(profileError.message);return;}}
+    }
     router.push("/dashboard");
   };
 

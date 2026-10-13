@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { invokeRentozi } from "@/lib/messaging";
 import Link from "next/link";
 
 
@@ -18,15 +18,7 @@ export default function ForgotPasswordPage() {
     setError(null);
     setMessage(null);
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://tenthanis.netlify.app/auth/reset-password",
-    });
-
-    if (error) setError(error.message);
-    else
-      setMessage(
-        "If an account exists for that email, a reset link has been sent."
-      );
+    try{const result=await invokeRentozi("account-email",{kind:"recovery",email});setMessage(result.message);}catch(e){setError((e as Error).message);}
 
     setLoading(false);
   };

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { validateDocument } from "@/lib/documents";
 import { supabase } from "@/lib/supabase";
+import { notifyRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -246,15 +247,14 @@ export default function LeasePage() {
     }
 
     if (tenantMode && landlord?.email) {
-      await supabase.functions.invoke("send-email", {
-        body: {
+      const delivery = await notifyRentozi({
           to: landlord.email,
           subject: `Lease signed — ${tenant.full_name} (${house?.code})`,
           html: `<p style="color:#64748b;font-size:12px">${landlord.business_name || landlord.full_name || "Rentozi"}</p>
                  <p>${tenant.full_name} saved ID and signature for <strong>${house?.code} — ${house?.name}</strong>.</p>
                  <p><a href="https://rentozi.netlify.app/lease?tenant_id=${tenant.id}">Open lease</a></p>`,
-        },
       });
+      if(!delivery.ok)setError("Lease saved; email notice failed: "+delivery.error);
     }
 
     setForm((p) => ({

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { invokeRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -54,7 +55,7 @@ export default function SettingsPage() {
         return;
       }
       setLandlordId(lid);
-      setIsPlatformOwner(["ctenthani@gmail.com", "ctenthani@mubas.ac.mw"].includes((session.user.email || "").toLowerCase()));
+      const {data:platformOwner}=await supabase.rpc("rentozi_is_platform_owner");setIsPlatformOwner(!!platformOwner);
 
       const { data: own } = await supabase
         .from("landlords")
@@ -126,29 +127,10 @@ export default function SettingsPage() {
   };
 
   const createLandlord = async () => {
-    setError(null);
-    const { data, error: fnErr } = await supabase.functions.invoke("create-new-landlord", {
-      body: {
-        full_name: newLlName,
-        business_name: newLlBiz,
-        email: newLlEmail,
-      },
-    });
-    if (fnErr || data?.error) setError(fnErr?.message || data.error);
-    else setMsg("Landlord invitation sent. They choose their own password.");
+    setError(null);try{await invokeRentozi("create-new-landlord",{full_name:newLlName,business_name:newLlBiz,email:newLlEmail});setMsg("Landlord invitation sent. The recipient accepts it and chooses their own password if new.");}catch(e){setError((e as Error).message);}
   };
-
   const addManager = async () => {
-    setError(null);
-    const { data, error: fnErr } = await supabase.functions.invoke("create-manager", {
-      body: {
-        landlord_id: landlordId,
-        full_name: cmName,
-        email: cmEmail,
-      },
-    });
-    if (fnErr || data?.error) setError(fnErr?.message || data.error);
-    else setMsg("Invitation sent. The co-manager chooses their own password.");
+    setError(null);try{await invokeRentozi("create-manager",{landlord_id:landlordId,full_name:cmName,email:cmEmail});setMsg("Co-manager invitation sent. Existing accounts keep their password and accept the link to join.");}catch(e){setError((e as Error).message);}
   };
 
   const changePassword = async () => {
@@ -174,7 +156,7 @@ export default function SettingsPage() {
             ← Dashboard
           </Link>
           <p className="font-bold">Settings</p>
-          <span />
+          {isPlatformOwner&&<Link href="/owner" className="text-sm text-emerald-700">Site users</Link>}
         </div>
       </header>
 
@@ -202,21 +184,10 @@ export default function SettingsPage() {
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Name" value={cmName} onChange={(e) => setCmName(e.target.value)} />
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Email" value={cmEmail} onChange={(e) => setCmEmail(e.target.value)} />
           <button disabled={!isOwner} onClick={addManager} className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-xl text-sm">
-            Invite new co-manager
+            Invite co-manager
           </button>
         </section>
 
-        {isOwner && <section className="bg-white rounded-2xl border p-5 space-y-2">
-          <h2 className="font-bold">Add an existing co-manager</h2>
-          <p className="text-xs text-slate-500">They keep their password. This gives the existing user access to your rental business.</p>
-          <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Existing user's email" value={cmEmail} onChange={e => setCmEmail(e.target.value)} />
-          <button className="border rounded-xl px-4 py-2 text-sm" onClick={async () => {
-            if (!confirm("Give this existing user co-manager access to your properties?")) return;
-            const { data, error } = await supabase.rpc("invite_landlord_member", { p_email: cmEmail.trim() });
-            if (error || !data?.success) setError(error?.message || data?.error || "Could not add member");
-            else setMsg("Existing user added as co-manager. Their password is unchanged.");
-          }}>Add existing user</button>
-        </section>}
         <section className="bg-white rounded-2xl border p-5 space-y-2">
           <h2 className="font-bold">Business</h2>
           <p className="text-xs text-slate-500">This email receives payment reports, issues and lease signatures.</p>
