@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { invokeRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -18,56 +18,8 @@ export default function SignupPage() {
 
 
   const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setInfo(null);
-
-    const { data, error: signError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: "https://tenthanis.netlify.app/auth/login",
-      },
-    });
-
-    if (signError) {
-      setError(signError.message);
-      setLoading(false);
-      return;
-    }
-
-    // If email confirmation is required, there may be no session yet
-    if (!data.session) {
-      setInfo(
-        "Account created. Check your email to confirm, then sign in. Your landlord profile will be created on first sign-in if needed."
-      );
-      setLoading(false);
-      return;
-    }
-
-    // Session exists — create landlord profile via secure function
-    const { data: profileData, error: profileError } = await supabase.rpc(
-      "create_landlord_profile",
-      {
-        p_full_name: fullName,
-        p_business_name: businessName || fullName,
-      }
-    );
-
-    if (profileError) {
-      setError(profileError.message);
-      setLoading(false);
-      return;
-    }
-
-    if (profileData && profileData.success === false) {
-      setError(profileData.error || "Could not create landlord profile");
-      setLoading(false);
-      return;
-    }
-
-    router.push("/dashboard");
+    e.preventDefault();setLoading(true);setError(null);setInfo(null);
+    try{const result=await invokeRentozi("account-email",{kind:"signup",email,password,full_name:fullName,business_name:businessName||fullName});setInfo(result.message+" After confirming, sign in using the password you chose. Existing accounts keep their password.");setPassword("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}
   };
 
   return (
