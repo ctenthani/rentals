@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { currentBalance } from "@/lib/accounting";
 import { supabase } from "@/lib/supabase";
+import { invokeRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -90,6 +91,10 @@ export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState("");
   const [businessName, setBusinessName] = useState("My Rentals");
   const [landlordName, setLandlordName] = useState("");
+  const [isPlatformOwner,setIsPlatformOwner]=useState(false);
+  const [inviteOnAdd,setInviteOnAdd]=useState(true);
+  const [invitationStates,setInvitationStates]=useState<Record<string,any>>({});
+  const [notice,setNotice]=useState("");
   const [isAlsoTenant, setIsAlsoTenant] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +120,7 @@ export default function DashboardPage() {
       return;
     }
     setUserEmail(session.user.email || "");
+    const {data:platformOwner}=await supabase.rpc("rentozi_is_platform_owner");setIsPlatformOwner(!!platformOwner);
 
     const { data: tenantRows } = await supabase
       .from("tenants")
@@ -201,6 +207,7 @@ export default function DashboardPage() {
         };
       })
     );
+    const {data:states}=await supabase.rpc("rentozi_invitation_status",{p_tenants:tenantIds});setInvitationStates(Object.fromEntries((states||[]).map((r:any)=>[r.tenant_id,r])));
     setLoading(false);
   }
 
@@ -238,19 +245,12 @@ export default function DashboardPage() {
       return;
     }
     setSaving(true);
-    const { data, error: fnErr } = await supabase.functions.invoke("create-tenant-user", {
-      body: {
-        email: editing.email.trim(),
-        tenant_id: editing.id,
-        full_name: editing.full_name,
-      },
-    });
-    setSaving(false);
-    if (fnErr || data?.error) {
-      setError(fnErr?.message || data?.error);
-      return;
-    }
-    alert(`Invitation sent to ${editing.email}. They will choose their own password from the email link.`);
+    setError(null);
+    try{
+      const {error:saveError}=await supabase.rpc("rentozi_save_tenant_email",{p_tenant:editing.id,p_email:editing.email.trim()});if(saveError)throw saveError;
+      await invokeRentozi("create-tenant-user",{email:editing.email.trim(),tenant_id:editing.id,full_name:editing.full_name});
+      setNotice("Invitation sent to "+editing.email+". The recipient accepts the link to connect their profile. Existing passwords are preserved.");setEditing(null);
+    }catch(e){setError((e as Error).message);}finally{setSaving(false);}
     await loadData();
   };
 
@@ -258,7 +258,7 @@ export default function DashboardPage() {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    const { error: rpcErr } = await supabase.rpc("landlord_add_property", {
+    const { data:newTenantId,error: rpcErr } = await supabase.rpc("landlord_add_property", {
       p_house_name: addForm.house_name,
       p_house_code: addForm.house_code,
       p_monthly_rent: Number(addForm.monthly_rent),
@@ -267,12 +267,13 @@ export default function DashboardPage() {
       p_phone: addForm.phone,
       p_email: addForm.email || null,
     });
-    setSaving(false);
     if (rpcErr) {
-      setError(rpcErr.message);
+      setSaving(false);setError(rpcErr.message);
       return;
     }
     setShowAdd(false);
+    if(inviteOnAdd&&addForm.email){try{await invokeRentozi("create-tenant-user",{email:addForm.email.trim(),tenant_id:newTenantId,full_name:addForm.tenant_name});setNotice("Property saved and invitation sent. The recipient accepts the link to connect their profile.");}catch(e){setError("Property saved. Invitation failed: "+(e as Error).message+". Use Edit → Send login invitation to retry.");}}
+
     setAddForm({
       house_name: "",
       house_code: "",
@@ -282,7 +283,7 @@ export default function DashboardPage() {
       phone: "",
       email: "",
     });
-    await loadData();
+    setSaving(false);await loadData();
   };
 
   const handleDelete = async (tenantId: string) => {
@@ -346,7 +347,8 @@ export default function DashboardPage() {
               <Link href="/payments" className="px-2.5 py-1.5 rounded-lg text-slate-600">
                 Payments
               </Link>
-              <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">
+              {isPlatformOwner&&<Link href="/owner" className="text-xs bg-slate-900 text-white px-3 py-2 rounded-xl">Site users</Link>}
+            <Link href="/settings" className="px-2.5 py-1.5 rounded-lg text-slate-600">
                 Settings
               </Link>
               <Link href="/help" className="px-2.5 py-1.5 rounded-lg text-slate-600">
@@ -361,6 +363,7 @@ export default function DashboardPage() {
       </header>
 
       <main className="w-full px-4 lg:px-8 py-4 space-y-4">
+        {notice&&<p role="status" className="bg-emerald-50 text-emerald-800 p-3 rounded-xl">{notice}</p>}
         {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border p-4">
@@ -431,7 +434,7 @@ export default function DashboardPage() {
                     <StatusBadge status={r.status} />
                   </td>
                   <td className="px-2 py-2 text-[10px]">{r.bank_account || "—"}</td>
-                  <td className="px-2 py-2">{r.auth_user_id ? "Yes" : "No"}</td>
+                  <td className="px-2 py-2">{r.auth_user_id ? "Yes" : invitationStates[r.id]?.delivery_error ? "Email failed" : invitationStates[r.id]?.status==="pending"&&invitationStates[r.id]?.sent_at ? "Invited · awaiting acceptance" : invitationStates[r.id]?.status==="expired" ? "Invitation expired" : "No"}</td>
                   <td className="px-2 py-2 space-x-1 whitespace-nowrap">
                     <button onClick={() => setEditing({ ...r })} className="text-emerald-700 font-semibold">
                       Edit
@@ -522,9 +525,10 @@ export default function DashboardPage() {
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Bank account" value={addForm.bank_account} onChange={(e) => setAddForm({ ...addForm, bank_account: e.target.value })} />
             <input required className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Tenant name" value={addForm.tenant_name} onChange={(e) => setAddForm({ ...addForm, tenant_name: e.target.value })} />
             <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Phone" value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} />
-            <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
+            <input className="w-full border rounded-xl px-3 py-2 text-sm" type="email" placeholder="Email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
+            <label className="flex gap-2 text-sm"><input type="checkbox" checked={inviteOnAdd} onChange={e=>setInviteOnAdd(e.target.checked)}/>Send login invitation when an email is provided</label>
             <div className="flex gap-2">
-              <button className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save</button>
+              <button disabled={saving} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Save</button>
               <button type="button" onClick={() => setShowAdd(false)} className="text-slate-500 text-sm">
                 Cancel
               </button>
