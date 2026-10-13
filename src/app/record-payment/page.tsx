@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { notifyRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -135,8 +136,7 @@ export default function RecordPaymentPage() {
 
     if (!result.already_processed && selected.email && pay?.id) {
       const receiptLink = `https://rentozi.netlify.app/receipt?id=${pay.id}`;
-      await supabase.functions.invoke("send-email", {
-        body: {
+      const delivery = await notifyRentozi({
           to: selected.email,
           subject: `${biz}: rent payment confirmed`,
           html: `<p style="color:#64748b;font-size:12px">${biz}</p>
@@ -148,8 +148,8 @@ export default function RecordPaymentPage() {
                  Months covered: ${covered}</p>
                  <p>View / print your receipt:<br/><a href="${receiptLink}">${receiptLink}</a></p>
                  <p>Thank you.<br/>${biz}</p>`,
-        },
       });
+      if(!delivery.ok)setError("Payment saved; email notice failed: "+delivery.error);
     }
 
     inFlight.current = false;
