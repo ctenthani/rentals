@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { invokeRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import PortfolioRoles from "@/components/PortfolioRoles";
 
 
 export default function SettingsPage() {
@@ -177,8 +178,9 @@ export default function SettingsPage() {
           </section>
         )}
 
+        {isOwner&&landlordId&&<PortfolioRoles landlordId={landlordId}/>}
         <section className="bg-white rounded-2xl border p-5 space-y-2">
-          <h2 className="font-bold">Co-managers</h2>
+          <h2 className="font-bold">Invite a co-manager</h2>
           {!isOwner && <p className="text-xs text-slate-500">Only the account owner can invite co-managers.</p>}
           <p className="text-xs text-slate-500">Same properties as this account. New users choose their own password from the invitation link.</p>
           <input className="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Name" value={cmName} onChange={(e) => setCmName(e.target.value)} />
