@@ -137,6 +137,8 @@ export default function TenantPage() {
         .from("landlord_members")
         .select("id")
         .eq("auth_user_id", session.user.id)
+        .eq("role", "manager")
+        .eq("access_disabled", false)
         .limit(1);
       setIsAlsoLandlord(!!ownLl || !!(mem && mem.length));
 
