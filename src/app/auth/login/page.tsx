@@ -36,7 +36,9 @@ export default function LoginPage() {
       const {data:existing}=await supabase.rpc("my_landlord_id");
       if(!existing){const {error:profileError}=await supabase.rpc("create_landlord_profile",{p_full_name:signedIn.user.user_metadata.full_name||"My Rentals",p_business_name:signedIn.user.user_metadata.business_name||"My Rentals"});if(profileError){setLoading(false);setError(profileError.message);return;}}
     }
-    router.push("/dashboard");
+    const next = new URLSearchParams(window.location.search).get("next");
+    const safeNext = next && /^\/(receipt|pending)(\?|$)/.test(next) && !next.includes("\\") && !/[\r\n]/.test(next) ? next : "/dashboard";
+    router.push(safeNext);
   };
 
   return (

@@ -79,8 +79,9 @@ async function notifyOwner(
   subject: string,
   html: string
 ) {
-  const { data: rpcEmail } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
-  const to = String(rpcEmail || fallbackEmail || "").trim();
+  const { data: rpcEmail, error: recipientError } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
+  if (recipientError) return { ok: false, error: "Could not verify your landlord’s notification address. Contact your landlord." };
+  const to = String(rpcEmail || "").trim();
   if (!to) return { ok: false, error: "Landlord has no email in Settings" };
   return notifyRentozi({to,subject,html});
 }

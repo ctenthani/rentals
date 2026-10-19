@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { notifyRentozi } from "@/lib/messaging";
 import { currentBalance } from "@/lib/accounting";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -139,9 +140,11 @@ export default function TenantPayPage() {
       return;
     }
 
-    setSuccess(
-      "Payment reported. Your landlord will confirm it. Keep your transfer receipt."
-    );
+    const { data: recipient, error: recipientError } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
+    const delivery = !recipientError && recipient
+      ? await notifyRentozi({ to: recipient, subject: "Rent payment awaiting confirmation", html: '<p>A tenant has reported a payment. Sign in to review it.</p><p><a href="https://rentozi.netlify.app/pending">Review pending payments</a></p>' })
+      : { ok: false, error: "Could not verify the landlord notification address." };
+    setSuccess(delivery.ok ? "Payment reported. Your landlord has been notified." : "Payment reported, but the landlord email could not be sent. Please contact your landlord.");
     setNotes("");
   };
 

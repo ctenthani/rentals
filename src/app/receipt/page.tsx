@@ -41,13 +41,20 @@ export default function ReceiptPage() {
         return;
       }
 
+      const { data: identity, error: authError } = await supabase.auth.getUser();
+      if (authError || !identity.user) {
+        const next = '/receipt?id=' + encodeURIComponent(id);
+        window.location.replace('/auth/login?next=' + encodeURIComponent(next));
+        return;
+      }
+
       const { data: p, error: pErr } = await supabase
         .from("payments")
         .select("id, amount, method, paid_date, created_at, tenant_id, reference, months_covered, voided_at, void_reason")
         .eq("id", id)
         .maybeSingle();
       if (pErr || !p) {
-        setError(pErr?.message || "Receipt not found");
+        setError(pErr?.code === "42501" ? "Receipt access is unavailable. Please contact your landlord or Rentozi support." : "Receipt not found or not available to this account. Sign in with the email linked to this tenancy.");
         setLoading(false);
         return;
       }
