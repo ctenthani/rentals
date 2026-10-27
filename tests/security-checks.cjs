@@ -4,11 +4,11 @@ async function check(name,fn){await fn();console.log('PASS '+name);checks++;}
 function transpile(file){return ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;}
 const accounting={exports:{}};vm.runInNewContext(transpile('src/lib/accounting.ts'),accounting);
 function endpoint(name,opts={}){
- let handler,external=0,invites=0,banCalls=0,deletes=0;const generated=[],inserts=[];
+ let handler,external=0,invites=0,banCalls=0,deletes=0;const generated=[],inserts=[],updates=[],rpcs=[];
  const rowsFor=table=>opts.tables?.[table]|| (table==='tenants'&&opts.row?[opts.row]:[]);
- function builder(table){const filters=[];return {select(){return this},eq(k,v){filters.push([k,v]);return this},in(){return this},is(){return this},order(){return this},limit(){return this},insert:async value=>{inserts.push({table,value});return{error:opts.insertError?.[table]||null};},update(){return this},maybeSingle:async()=>({data:table==='rentozi_user_controls'&&opts.disabled?{disabled:true}:table==='rentozi_platform_owners'&&opts.protected?{user_id:'target'}:rowsFor(table).find(r=>filters.every(([k,v])=>r[k]===v))||null,error:null}),then(resolve){resolve({data:rowsFor(table).filter(r=>filters.every(([k,v])=>r[k]===v)),error:null});}};}
+ function builder(table){const filters=[];const matches=r=>filters.every(([k,v,op])=>op==='gte'?r[k]>=v:op==='lte'?r[k]<=v:r[k]===v);return {select(){return this},eq(k,v){filters.push([k,v]);return this},gte(k,v){filters.push([k,v,'gte']);return this},lte(k,v){filters.push([k,v,'lte']);return this},in(){return this},is(){return this},order(){return this},limit(){return this},insert:async value=>{inserts.push({table,value});return{error:opts.insertError?.[table]||null};},update(value){updates.push({table,value});return this},maybeSingle:async()=>({data:table==='rentozi_user_controls'&&opts.disabled?{disabled:true}:table==='rentozi_platform_owners'&&opts.protected?{user_id:'target'}:rowsFor(table).find(matches)||null,error:null}),then(resolve){resolve({data:rowsFor(table).filter(matches),error:null});}};}
  const url='https://project.example.invalid';
- const client={auth:{getUser:async()=>({data:{user:opts.user||null},error:null}),admin:{getUserById:async()=>({data:{user:opts.target||{id:'target',email:'target@example.invalid',email_confirmed_at:'2026-01-01'}},error:null}),listUsers:async()=>({data:{users:opts.accounts||[],total:(opts.accounts||[]).length},error:null}),updateUserById:async()=>{banCalls++;return{error:null};},deleteUser:async()=>{deletes++;return{error:null};},generateLink:async params=>{invites++;generated.push(params);const link=url+'/auth/v1/verify?redirect_to='+encodeURIComponent(params.options.redirectTo);return opts.inviteError?{error:opts.inviteError,data:{}}:{data:{user:{id:'new-user'},properties:{action_link:link}},error:null};}}},from:builder,rpc:async(name,args)=>{
+ const client={auth:{getUser:async()=>({data:{user:opts.user||null},error:null}),admin:{getUserById:async()=>({data:{user:opts.target||{id:'target',email:'target@example.invalid',email_confirmed_at:'2026-01-01'}},error:null}),listUsers:async()=>({data:{users:opts.accounts||[],total:(opts.accounts||[]).length},error:null}),updateUserById:async()=>{banCalls++;return{error:null};},deleteUser:async()=>{deletes++;return{error:null};},generateLink:async params=>{invites++;generated.push(params);const link=url+'/auth/v1/verify?redirect_to='+encodeURIComponent(params.options.redirectTo);return opts.inviteError?{error:opts.inviteError,data:{}}:{data:{user:{id:'new-user'},properties:{action_link:link}},error:null};}}},from:builder,rpc:async(name,args)=>{rpcs.push({name,args});if(opts.rpcError?.[name])return {error:{message:'Unavailable'}};
   if(name==='rentozi_user_property_counts')return{data:opts.propertyCounts||[],error:opts.countError||null};
   if(name==='rentozi_prepare_invitation'){
    if(!opts.allowed)return{data:null,error:{code:'42501',message:'Not allowed'}};
@@ -24,9 +24,9 @@ function endpoint(name,opts={}){
   return{data:opts.allowed??false,error:null};
  }};
  const env=opts.env||{SUPABASE_URL:url,RESEND_API_KEY:'test-only-sender-key',EMAIL_FROM:'Test <sender@example.invalid>'};
- const context={exports:{},require:()=>({createClient:()=>client}),Deno:{env:{get:key=>env[key]},serve:fn=>handler=fn},Request,Response,URL,console,AbortSignal,crypto:require('node:crypto').webcrypto,TextEncoder,fetch:async()=>{external++;return Response.json(opts.providerError?{message:'Sender rejected'}:{id:'accepted-id'},{status:opts.providerError?403:200});}};
+ const context={exports:{},require:()=>({createClient:()=>client}),Deno:{env:{get:key=>env[key]},serve:fn=>handler=fn},Request,Response,URL,console,AbortSignal,setTimeout:fn=>{fn();return 0},Date:opts.now?class extends Date{constructor(...args){super(...(args.length?args:[opts.now]));}static now(){return new Date(opts.now).getTime();}}:Date,crypto:require('node:crypto').webcrypto,TextEncoder,fetch:async()=>{external++;return Response.json(opts.providerError?{message:'Sender rejected'}:{id:'accepted-id'},{status:opts.providerError?403:200});}};
  vm.runInNewContext(transpile('supabase/functions/'+name+'/index.ts'),context);
- return{run:(body={},headers={})=>handler(new Request('https://example.invalid',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)})),get external(){return external},get invites(){return invites},get bans(){return banCalls},get deletes(){return deletes},generated,inserts};
+ return{run:(body={},headers={})=>handler(new Request('https://example.invalid',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)})),get external(){return external},get invites(){return invites},get bans(){return banCalls},get deletes(){return deletes},generated,inserts,updates,rpcs};
 }
 
 (async()=>{
@@ -96,5 +96,31 @@ function endpoint(name,opts={}){
   const r=await e.run({action:'list'}),body=await r.json();assert.equal(r.status,200);assert.deepEqual(body.users[0].roles,['Tenant']);assert.deepEqual(body.users[1].roles,['Co-manager']);assert.deepEqual(body.users[2].roles,['Tenant']);assert.equal(body.users[1].property_counts.managed_properties,12);assert.equal(body.users[0].property_counts.managed_properties,0);assert.equal(e.external,0);
  });
  await check('Unavailable property counts are reported instead of silently claiming zero',async()=>{const e=endpoint('platform-users',{user:{id:'owner'},owner:true,accounts:[{id:'manager'}],countError:{message:'Unavailable'}});assert.equal((await e.run({action:'list'})).status,503);});
+
+ const cronEnv={SUPABASE_URL:'https://project.example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test-service',RESEND_API_KEY:'test-only-key',EMAIL_FROM:'sender@example.invalid',CRON_SECRET:'test-cron-only'};
+ const dueTenant={id:'tenant',full_name:'Tenant',email:'tenant@example.invalid',is_active:true,houses:{monthly_rent:1000}};
+ for(const name of ['send-reminders','send-rent-reminders']){
+  await check(name+' catches up November 1 reminder on October 27 without pretending it is seven days away',async()=>{
+   const e=endpoint(name,{env:cronEnv,now:'2026-10-27T06:00:00Z',tables:{tenant_balances:[{tenant_id:'tenant',next_due_date:'2026-11-01'}],tenants:[dueTenant]}}),r=await e.run({}, {'x-cron-secret':'test-cron-only'}),body=await r.json();
+   assert.equal(r.status,200);assert.equal(body.sent,1);assert.equal(e.inserts.find(x=>x.table==='rent_reminders').value.days_before,7);assert.equal(e.inserts.find(x=>x.table==='rentozi_email_log').value.subject,'Rent reminder: due in 5 days');
+  });
+  await check(name+' preview is read-only and uses Malawi day across UTC midnight',async()=>{
+   const e=endpoint(name,{env:cronEnv,now:'2026-10-26T22:30:00Z',tables:{tenant_balances:[{tenant_id:'tenant',next_due_date:'2026-11-01'},{tenant_id:'old',next_due_date:'2026-10-26'},{tenant_id:'future',next_due_date:'2026-11-04'}],tenants:[dueTenant]}}),r=await e.run({dry_run:true},{Authorization:'Bearer test-service'}),b=await r.json();
+   assert.equal(r.status,200);assert.equal(b.today,'2026-10-27');assert.equal(b.eligible,1);assert.equal(b.candidates[0].days_remaining,5);assert.equal(e.external,0);assert.equal(e.inserts.length,0);assert.equal(e.updates.length,0);assert.equal(e.rpcs.length,0);
+  });
+  await check(name+' skips previously sent and inactive tenants',async()=>{
+   const e=endpoint(name,{env:cronEnv,now:'2026-10-27T06:00:00Z',tables:{tenant_balances:[{tenant_id:'tenant',next_due_date:'2026-11-01'},{tenant_id:'inactive',next_due_date:'2026-11-01'}],rent_reminders:[{id:'sent',tenant_id:'tenant',due_date:'2026-11-01',days_before:7}],tenants:[dueTenant,{...dueTenant,id:'inactive',is_active:false}]}}),r=await e.run({}, {'x-cron-secret':'test-cron-only'}),b=await r.json();assert.equal(b.sent,0);assert.equal(b.skipped,2);assert.equal(e.external,0);
+  });
+  await check(name+' late second reminder uses stable two-day slot with truthful tomorrow subject',async()=>{
+   const e=endpoint(name,{env:cronEnv,now:'2026-10-31T06:00:00Z',tables:{tenant_balances:[{tenant_id:'tenant',next_due_date:'2026-11-01'}],tenants:[dueTenant]}}),r=await e.run({}, {'x-cron-secret':'test-cron-only'});assert.equal((await r.json()).sent,1);assert.equal(e.inserts.find(x=>x.table==='rent_reminders').value.days_before,2);assert.equal(e.inserts.find(x=>x.table==='rentozi_email_log').value.subject,'Rent reminder: due tomorrow');
+  });
+  await check(name+' rejects anonymous and wrong scheduler credentials',async()=>{
+   const e=endpoint(name,{env:cronEnv});assert.equal((await e.run({dry_run:true})).status,401);assert.equal((await e.run({}, {'x-cron-secret':'wrong'})).status,401);assert.equal((await e.run({}, {Authorization:'Bearer public-anon'})).status,401);assert.equal(e.external,0);
+  });
+  await check(name+' dashboard secret key authorizes preview, public keys do not',async()=>{const e=endpoint(name,{env:{...cronEnv,SUPABASE_SECRET_KEYS:JSON.stringify({default:'sb_secret_test'})}});assert.equal((await e.run({dry_run:true},{apikey:'sb_secret_test'})).status,200);assert.equal((await e.run({dry_run:true},{apikey:'sb_publishable_test'})).status,401);assert.equal(e.external,0);});
+  await check(name+' records failed runs rather than claiming no reminders needed',async()=>{
+   const e=endpoint(name,{env:cronEnv,rpcError:{run_monthly_dues:true}});assert.equal((await e.run({}, {'x-cron-secret':'test-cron-only'})).status,503);assert.equal(e.updates.find(x=>x.table==='rentozi_reminder_runs').value.status,'failed');assert.equal(e.external,0);
+  });
+ }
  console.log(checks+' checks passed. All invitations, delivery and database operations mocked.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

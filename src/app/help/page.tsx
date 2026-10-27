@@ -38,7 +38,7 @@ export default function HelpPage() {
             <li>Home shows paid months, next due date and receipts you can open or print.</li>
             <li>Pay: send money to the numbers shown, then submit amount + transaction ID + screenshot.</li>
             <li>Wait for confirmation, then download the receipt.</li>
-            <li>You get reminder emails 7 days and 3 days before rent is due. Ignore if already paid.</li>
+            <li>You get reminder emails 7 days and 2 days before rent is due. Missed runs are caught up before the due date. Ignore if already paid.</li>
             <li>Issues = repairs. Lease = read and sign.</li>
           </ol>
         </section>
