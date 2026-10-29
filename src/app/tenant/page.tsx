@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { currentBalance } from "@/lib/accounting";
 import { validateDocument } from "@/lib/documents";
 import { supabase } from "@/lib/supabase";
+import { paymentRequest, savePaymentReport, clearPaymentRequest, type PaymentRequest } from "@/lib/payment-actions";
 import { notifyRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -77,13 +78,14 @@ async function notifyOwner(
   tenantId: string,
   fallbackEmail: string | null | undefined,
   subject: string,
-  html: string
+  html: string,
+  requestId?: string
 ) {
   const { data: rpcEmail, error: recipientError } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
   if (recipientError) return { ok: false, error: "Could not verify your landlord’s notification address. Contact your landlord." };
   const to = String(rpcEmail || "").trim();
   if (!to) return { ok: false, error: "Landlord has no email in Settings" };
-  return notifyRentozi({to,subject,html});
+  return notifyRentozi({to,subject,html,request_id:requestId});
 }
 
 export default function TenantPage() {
@@ -105,6 +107,12 @@ export default function TenantPage() {
   const [reference, setReference] = useState("");
   const [paidDate, setPaidDate] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const paymentLock = useRef(false);
+  const paymentId = useRef<PaymentRequest | null>(null);
+  const [paymentPhase, setPaymentPhase] = useState("");
+  const [paymentSaved, setPaymentSaved] = useState(false);
+  useEffect(() => { paymentId.current = null; setPaymentSaved(false); setPaymentPhase(""); }, [selectedId]);
+
   const [issue, setIssue] = useState("");
 
   const selected = units.find((u) => u.id === selectedId) || units[0];
@@ -190,46 +198,37 @@ export default function TenantPage() {
       setError("Enter a valid amount greater than zero");
       return;
     }
-    setError(null);
-    setMsg(null);
-    let proof: string | null = null;
-    if (file) {
-      try { validateDocument(file); } catch (e: any) { setError(e.message); return; }
-      const path = `${selected.id}/${Date.now()}-${file.name}`;
-      const { error: upErr } = await supabase.storage.from("payment-proofs").upload(path, file);
-      if (upErr) {
-        setError(upErr.message);
-        return;
+
+    if (paymentLock.current || paymentSaved) return;
+    if (file) { try { validateDocument(file); } catch (e: any) { setError(e.message); return; } }
+    paymentLock.current = true;
+    setError(null); setMsg(null); setPaymentPhase(file ? "Uploading proof…" : "Submitting payment…");
+    let saved = false;
+    try {
+      const report = { tenant_id: selected.id, amount: paymentAmount, method, reference_used: reference, paid_date: paidDate || new Date().toISOString().slice(0, 10), status: "pending" };
+      paymentId.current = await paymentRequest(selected.id, { ...report, file: file ? [file.name, file.size, file.lastModified] : null }, paymentId.current);
+      let proof: string | null = null;
+      if (file) {
+        const path = `${selected.id}/${paymentId.current.id}-${file.name}`;
+        const { error: upErr } = await supabase.storage.from("payment-proofs").upload(path, file);
+        if (upErr && String(upErr.statusCode) !== "409") throw Error(upErr.message);
+        proof = path;
       }
-      proof = path;
-    }
-    const { error: insErr } = await supabase.from("payment_submissions").insert({
-      tenant_id: selected.id,
-      amount: paymentAmount,
-      method,
-      reference_used: reference,
-      paid_date: paidDate || new Date().toISOString().slice(0, 10),
-      proof_path: proof,
-      status: "pending",
-    });
-    if (insErr) {
-      setError(insErr.message);
-      return;
-    }
-    const mail = await notifyOwner(
-      supabase,
-      selected.id,
-      landlord?.email,
-      `Payment to confirm — ${selected.full_name} (${selected.house?.code})`,
-      `<p>${selected.full_name} reported <strong>${formatMK(Number(amount))}</strong> via ${method}
-       for <strong>${selected.house?.code} — ${selected.house?.name}</strong>.</p>
-       <p>Reference: ${reference || "—"}</p>
-       <p><a href="https://rentozi.netlify.app/pending">Open Pending</a></p>`
-    );
-    setMsg(mail.ok ? "Submitted. Email accepted by the provider for your landlord." : `Submitted, but email failed: ${mail.error}`);
-    setAmount("");
-    setReference("");
-    setFile(null);
+      setPaymentPhase("Submitting payment…");
+      await savePaymentReport(supabase, { ...report, proof_path: proof }, paymentId.current.id);
+      saved = true; setPaymentSaved(true);
+      setMsg("Payment submitted for confirmation. Do not submit it again.");
+      setPaymentPhase("Payment submitted · notifying landlord…");
+      const mail = await notifyOwner(supabase, selected.id, landlord?.email,
+        `Payment to confirm — ${selected.full_name} (${selected.house?.code})`,
+        `<p>${selected.full_name} reported <strong>${formatMK(paymentAmount)}</strong> via ${method} for <strong>${selected.house?.code} — ${selected.house?.name}</strong>.</p><p>Reference: ${reference || "—"}</p><p><a href="https://rentozi.netlify.app/pending">Open Pending</a></p>`,
+        "payment-report-" + paymentId.current.id);
+      setMsg(mail.ok ? "Payment submitted. Your landlord has been notified." : "Payment submitted for confirmation. Email delivery could not be confirmed; contact your landlord. Do not submit again.");
+      setAmount(""); setReference(""); setFile(null);
+    } catch (e: any) {
+      if (saved) setMsg("Payment submitted for confirmation. Email delivery could not be confirmed; do not submit again.");
+      else setError("Could not confirm submission. Retry the same details safely. " + e.message);
+    } finally { paymentLock.current = false; setPaymentPhase(""); }
   };
 
   const submitIssue = async (e: React.FormEvent) => {
@@ -301,6 +300,7 @@ export default function TenantPage() {
           {units.length > 1 && (
             <select
               className="w-full border rounded-xl px-3 py-2 text-sm bg-white"
+              disabled={!!paymentPhase}
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
             >
@@ -380,6 +380,7 @@ export default function TenantPage() {
         {tab === "pay" && (
           <form onSubmit={submitPay} className="bg-white rounded-2xl border p-5 space-y-3">
             <h2 className="font-bold">Report a payment</h2>
+            <fieldset disabled={!!paymentPhase || paymentSaved} className="space-y-3">
             <div className="text-sm bg-slate-50 rounded-xl p-3 space-y-1">
               <p className="font-semibold">Pay to</p>
               {selected.house?.bank_account && <p>Account: {selected.house.bank_account}</p>}
@@ -407,8 +408,11 @@ export default function TenantPage() {
               onChange={(e) => setReference(e.target.value)}
             />
             <input type="date" className="w-full border rounded-xl px-3 py-2 text-sm" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
-            <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            <button className="w-full bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold">Submit for confirmation</button>
+            <input key={String(paymentSaved)} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <button disabled={!!paymentPhase || paymentSaved} aria-busy={!!paymentPhase} className="w-full bg-emerald-600 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold">{paymentPhase || (paymentSaved ? "Payment submitted" : "Submit for confirmation")}</button>
+            </fieldset>
+            <p role="status" aria-live="polite" className="text-sm">{paymentPhase || (paymentSaved ? msg : "")}</p>
+            {paymentSaved && !paymentPhase && <button type="button" className="text-emerald-700 underline text-sm" onClick={() => { clearPaymentRequest(selected.id); paymentId.current = null; setPaymentSaved(false); setMsg(null); setAmount(""); setReference(""); setFile(null); }}>Report another payment</button>}
           </form>
         )}
 

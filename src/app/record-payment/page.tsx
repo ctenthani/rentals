@@ -125,11 +125,15 @@ export default function RecordPaymentPage() {
     if (request.current?.details !== details) request.current = { details, id: crypto.randomUUID() };
     inFlight.current = true;
     setSaving(true); setError(null); setMsg(null);
+    let committed = false;
+    try {
     const { data: result, error: pErr } = await supabase.rpc("rentozi_record_payment", {
       p_tenant: selected.id, p_amount: value, p_method: method, p_date: paidDate,
       p_reference: reference, p_request: request.current.id,
     });
     if (pErr) { inFlight.current = false; setSaving(false); setError(pErr.message); return; }
+    committed = true;
+    setMsg("Payment saved. Sending the tenant notification…");
     const pay = { id: result.payment_id };
     const covered = Number(result.months || 0);
     const nextDue = result.next_due_date;
@@ -137,6 +141,7 @@ export default function RecordPaymentPage() {
     if (!result.already_processed && selected.email && pay?.id) {
       const receiptLink = `https://rentozi.netlify.app/receipt?id=${pay.id}`;
       const delivery = await notifyRentozi({
+          request_id: "record-payment-" + pay.id,
           to: selected.email,
           subject: `${biz}: rent payment confirmed`,
           html: `<p style="color:#64748b;font-size:12px">${biz}</p>
@@ -152,12 +157,14 @@ export default function RecordPaymentPage() {
       if(!delivery.ok)setError("Payment saved; email notice failed: "+delivery.error);
     }
 
-    inFlight.current = false;
     request.current = null;
-    setSaving(false);
     setMsg(`Saved. ${covered} complete month(s) credited. Remaining balance ${formatMK(Number(result.balance))}; part-month credit ${formatMK(Number(result.credit))}. Next due ${nextDue}.`);
     setAmount("");
     setReference("");
+    } catch (e: any) {
+      if (committed) { setMsg("Payment saved. Do not record it again."); setAmount(""); setReference(""); setError("Email delivery could not be confirmed. " + e.message); }
+      else setError("Could not confirm the payment was saved. Retry the same details safely. " + e.message);
+    } finally { inFlight.current = false; setSaving(false); }
   };
 
   if (loading) {

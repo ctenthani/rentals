@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { paymentRequest, savePaymentReport, clearPaymentRequest, type PaymentRequest } from "@/lib/payment-actions";
 import { notifyRentozi } from "@/lib/messaging";
 import { currentBalance } from "@/lib/accounting";
 import { useRouter } from "next/navigation";
@@ -21,6 +22,10 @@ function formatMK(amount: number) {
 export default function TenantPayPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [phase, setPhase] = useState("");
+  const inFlight = useRef(false);
+  const request = useRef<PaymentRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -118,34 +123,25 @@ export default function TenantPayPage() {
       return;
     }
 
-    setSubmitting(true);
-    setError(null);
-    setSuccess(null);
 
-    // Insert as pending submission for landlord to confirm
-    const { error: insError } = await supabase.from("payment_submissions").insert({
-      tenant_id: tenantId,
-      amount: paymentAmount,
-      method,
-      reference_used: reference || null,
-      paid_date: paidDate,
-      status: "pending",
-      notes: notes || null,
-    });
-
-    setSubmitting(false);
-
-    if (insError) {
-      setError("Payment was not submitted. Please try again or contact your landlord. " + insError.message);
-      return;
-    }
-
-    const { data: recipient, error: recipientError } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
-    const delivery = !recipientError && recipient
-      ? await notifyRentozi({ to: recipient, subject: "Rent payment awaiting confirmation", html: '<p>A tenant has reported a payment. Sign in to review it.</p><p><a href="https://rentozi.netlify.app/pending">Review pending payments</a></p>' })
-      : { ok: false, error: "Could not verify the landlord notification address." };
-    setSuccess(delivery.ok ? "Payment reported. Your landlord has been notified." : "Payment reported, but the landlord email could not be sent. Please contact your landlord.");
-    setNotes("");
+    if (inFlight.current || saved) return;
+    inFlight.current = true; setSubmitting(true); setPhase("Submitting…"); setError(null); setSuccess(null);
+    let committed = false;
+    try {
+      const report = { tenant_id: tenantId, amount: paymentAmount, method, reference_used: reference || null, paid_date: paidDate, status: "pending", notes: notes || null };
+      request.current = await paymentRequest(tenantId, report, request.current);
+      await savePaymentReport(supabase, report, request.current.id);
+      committed = true; setSaved(true); setSuccess("Payment submitted for confirmation. Do not submit again."); setPhase("Payment submitted · notifying landlord…");
+      const { data: recipient, error: recipientError } = await supabase.rpc("landlord_notify_email", { p_tenant_id: tenantId });
+      const delivery = !recipientError && recipient
+        ? await notifyRentozi({ to: recipient, request_id: "payment-report-" + request.current.id, subject: "Rent payment awaiting confirmation", html: '<p>A tenant has reported a payment. Sign in to review it.</p><p><a href="https://rentozi.netlify.app/pending">Review pending payments</a></p>' })
+        : { ok: false };
+      setSuccess(delivery.ok ? "Payment reported. Your landlord has been notified." : "Payment reported. Email delivery could not be confirmed; contact your landlord. Do not submit again.");
+      setNotes("");
+    } catch (e: any) {
+      if (committed) setSuccess("Payment reported. Email delivery could not be confirmed; do not submit again.");
+      else setError("Could not confirm submission. Retry the same details safely. " + e.message);
+    } finally { inFlight.current = false; setSubmitting(false); setPhase(""); }
   };
 
   if (loading) {
@@ -231,6 +227,7 @@ export default function TenantPayPage() {
           className="bg-white rounded-2xl border p-5 shadow-sm space-y-3"
         >
           <h2 className="font-semibold text-slate-900">I have paid</h2>
+          <fieldset disabled={submitting || saved} className="space-y-3">
           <p className="text-xs text-slate-500">
             After you transfer, submit the details below for the landlord to
             confirm.
@@ -306,11 +303,14 @@ export default function TenantPayPage() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || saved} aria-busy={submitting}
             className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-semibold py-3 rounded-xl"
           >
-            {submitting ? "Submitting..." : "Submit payment report"}
+            {phase || (saved ? "Payment submitted" : "Submit payment report")}
           </button>
+          </fieldset>
+          <p role="status" aria-live="polite" className="text-sm">{phase || (saved ? success : "")}</p>
+          {saved && !submitting && <button type="button" className="text-emerald-700 underline text-sm" onClick={() => { if (tenantId) clearPaymentRequest(tenantId); request.current = null; setSaved(false); setSuccess(null); setAmount(""); setReference(""); }}>Report another payment</button>}
         </form>
       </main>
     </div>

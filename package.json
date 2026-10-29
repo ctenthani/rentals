@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node tests/security-checks.cjs && node --test tests/reminder-scheduler.test.mjs"
+    "test": "node tests/security-checks.cjs && node --test tests/reminder-scheduler.test.mjs tests/payment-actions.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -20,6 +20,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.19",
+    "jsdom": "^30.1.3",
     "postcss": "^8.5.29",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.5.3"
