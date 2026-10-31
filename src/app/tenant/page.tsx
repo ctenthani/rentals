@@ -8,6 +8,7 @@ import { paymentRequest, savePaymentReport, clearPaymentRequest, type PaymentReq
 import { notifyRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import IssueInbox from "@/components/IssueInbox";
 
 
 function formatMK(n: number) {
@@ -114,6 +115,9 @@ export default function TenantPage() {
   useEffect(() => { paymentId.current = null; setPaymentSaved(false); setPaymentPhase(""); }, [selectedId]);
 
   const [issue, setIssue] = useState("");
+  const [issueRefresh,setIssueRefresh]=useState(0);
+  const issueLock=useRef(false);
+  const [issueBusy,setIssueBusy]=useState(false);
 
   const selected = units.find((u) => u.id === selectedId) || units[0];
 
@@ -233,7 +237,9 @@ export default function TenantPage() {
 
   const submitIssue = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selected || !issue.trim()) return;
+    if (!selected || !issue.trim() || issueLock.current) return;
+    issueLock.current=true;setIssueBusy(true);
+    try {
     setError(null);
     const { error: iErr } = await supabase.from("tenant_issues").insert({
       tenant_id: selected.id,
@@ -244,6 +250,7 @@ export default function TenantPage() {
       setError(iErr.message);
       return;
     }
+    setIssueRefresh(n=>n+1);setIssue("");setMsg("Issue saved. You can track replies below.");
     const mail = await notifyOwner(
       supabase,
       selected.id,
@@ -254,7 +261,8 @@ export default function TenantPage() {
        <p>${selected.full_name} ${selected.phone || ""}</p>`
     );
     setIssue("");
-    setMsg(mail.ok ? "Issue sent. Email accepted by the provider for your landlord." : `Saved, but email failed: ${mail.error}`);
+    setMsg(mail.ok ? "Issue saved and landlord notified. Track replies below." : "Issue saved in the app. Email notification could not be confirmed.");
+    } catch(e){setError((e as Error).message);}finally{issueLock.current=false;setIssueBusy(false);}
   };
 
   if (loading) {
@@ -417,7 +425,7 @@ export default function TenantPage() {
         )}
 
         {tab === "issues" && (
-          <form onSubmit={submitIssue} className="bg-white rounded-2xl border p-5 space-y-3">
+          <div className="space-y-4"><IssueInbox tenantId={selected.id} refreshKey={issueRefresh}/><form onSubmit={submitIssue} className="bg-white rounded-2xl border p-5 space-y-3">
             <h2 className="font-bold">Report an issue</h2>
             <textarea
               required
@@ -427,8 +435,8 @@ export default function TenantPage() {
               value={issue}
               onChange={(e) => setIssue(e.target.value)}
             />
-            <button className="w-full bg-slate-800 text-white py-2.5 rounded-xl text-sm font-semibold">Send to landlord</button>
-          </form>
+            <button disabled={issueBusy} className="w-full bg-slate-800 text-white py-2.5 rounded-xl text-sm font-semibold">{issueBusy?"Saving issue…":"Send to landlord"}</button>
+          </form></div>
         )}
       </main>
     </div>

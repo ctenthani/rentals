@@ -1,0 +1,5 @@
+const fs=require('fs'),vm=require('vm'),ts=require('typescript'),test=require('node:test'),assert=require('node:assert/strict');
+function load(file,imports={}){const m={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:m.exports,module:m,require:n=>imports[n]||require(n)});return m.exports;}
+const {anticipatedRent:f}=load('src/lib/rent-forecast.ts',{'./accounting':load('src/lib/accounting.ts')});
+test('advance-paid months excluded; billing resumes on next due month',()=>{const r={monthly_rent:1000,next_due_date:'2027-02-01',months_in_advance:3};assert.equal(f(r,'2026-11'),0);assert.equal(f(r,'2027-02'),1000);assert.equal(f(r,'2027-03'),1000);});
+test('month-end cycles, partial credit, archived tenants and missing schedules',()=>{assert.equal(f({monthly_rent:1000,next_due_date:'2026-01-31'},'2026-02'),1000);assert.equal(f({monthly_rent:1000,next_due_date:'2026-11-01',partial_credit:400},'2026-11'),600);assert.equal(f({is_active:false},'2026-11'),0);assert.equal(f({monthly_rent:1000},'2026-11'),null);});

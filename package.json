@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node tests/security-checks.cjs && node --test tests/reminder-scheduler.test.mjs tests/payment-actions.test.cjs"
+    "test": "node tests/security-checks.cjs && node --test tests/reminder-scheduler.test.mjs tests/payment-actions.test.cjs tests/rent-forecast.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { invokeRentozi } from "@/lib/messaging";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import IssueInbox from "@/components/IssueInbox";
+import {anticipatedRent} from "@/lib/rent-forecast";
 
 
 function formatMK(n: number) {
@@ -87,6 +89,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function DashboardPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [forecastMonth,setForecastMonth]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Blantyre"}).slice(0,7));
   const [rows, setRows] = useState<any[]>([]);
   const [userEmail, setUserEmail] = useState("");
   const [businessName, setBusinessName] = useState("My Rentals");
@@ -216,7 +219,7 @@ export default function DashboardPage() {
   }, [router]);
 
   const totals = {
-    expected: rows.filter(r => r.is_active !== false).reduce((s, r) => s + r.monthly_rent, 0),
+    expected: rows.filter(r => r.is_active !== false).reduce((s, r) => s + (anticipatedRent(r,forecastMonth)??0), 0),
     outstanding: rows.reduce((s, r) => s + r.current_balance, 0),
     paid: rows.filter((r) => r.status === "paid").length,
     overdue: rows.filter((r) => r.status === "overdue" || r.status === "due").length,
@@ -367,8 +370,8 @@ export default function DashboardPage() {
         {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border p-4">
-            <p className="text-[11px] uppercase text-slate-500 font-semibold">Expected</p>
-            <p className="text-lg font-bold text-emerald-700">{formatMK(totals.expected)}</p>
+            <label className="text-[11px] uppercase text-slate-500 font-semibold">Rent still due in <input aria-label="Forecast month" type="month" min={new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Blantyre"}).slice(0,7)} value={forecastMonth} onChange={e=>e.target.value&&setForecastMonth(e.target.value)}/></label>
+            <p className="text-lg font-bold text-emerald-700">{formatMK(totals.expected)}</p><p className="text-xs text-slate-500">Based on next due dates; advance-paid months excluded. Arrears shown separately.</p>
           </div>
           <div className="bg-white rounded-2xl border p-4">
             <p className="text-[11px] uppercase text-slate-500 font-semibold">Outstanding</p>
@@ -386,6 +389,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <IssueInbox manager tenantLabels={Object.fromEntries(rows.map(r=>[r.id,`${r.full_name} · ${r.house_code}`]))}/>
         <div className="flex justify-between items-center">
           <h2 className="font-bold">Houses &amp; Tenants</h2>
           <button onClick={() => setShowAdd(true)} className="bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-xl">
@@ -397,7 +401,7 @@ export default function DashboardPage() {
           <table className="w-full text-left text-xs">
             <thead className="bg-emerald-50 text-emerald-900">
               <tr>
-                {["House", "Tenant", "Rent", "Next due", "This cycle", "Balance", "Status", "Bank", "Login", "Actions"].map((h) => (
+                {["House", "Tenant", "Rent", "Due in selected month", "Next due", "This cycle", "Balance", "Status", "Bank", "Login", "Actions"].map((h) => (
                   <th key={h} className="px-2 py-2">
                     {h}
                   </th>
@@ -415,7 +419,7 @@ export default function DashboardPage() {
                     {r.full_name}
                     <div className="text-[10px] text-slate-400">{r.phone}</div>
                   </td>
-                  <td className="px-2 py-2">{formatMK(r.monthly_rent)}</td>
+                  <td className="px-2 py-2">{formatMK(r.monthly_rent)}</td><td className="px-2 py-2">{anticipatedRent(r,forecastMonth)==null?"Set next due date":formatMK(anticipatedRent(r,forecastMonth)!)}</td>
                   <td className="px-2 py-2">{r.next_due_date || "—"}</td>
                   <td className="px-2 py-2">
                     <div className="flex flex-wrap gap-1 max-w-[220px]">
